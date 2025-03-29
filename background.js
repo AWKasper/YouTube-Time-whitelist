@@ -346,22 +346,54 @@ function isYoutubeVideo(url) {
 	return url.match(/(https?:\/\/(?!music\.)(.+?\.)?youtube\.com\/watch([A-Za-z0-9\-\._~:\/\?#\[\]@!$&'\(\)\*\+,;\=]*)?)/)
 }
 
-function updateTime() {
+
+function setWhitelistBadge() {
+    chrome.action.setBadgeText({ "text": "✓" }); // Using a checkmark symbol
+    chrome.action.setBadgeBackgroundColor({ color: "#28a745" }); // Green background
+    // For white text, the browser usually handles contrast automatically,
+    // but if needed, you could explore chrome.action.setBadgeTextColor (less common/supported).
+    // Green background with the default white text should be visible.
+}
+
+
+async function updateTime() {
 	if (timeLeft > 0) {
 		timeLeft--;
 	} else {
+        // Timer expired
 		clearInterval(timer);
 		timer = null;
-		blockRedirect(); // Call blockRedirect when time hits 0
-		return; // Stop further execution in this tick after blocking
+        let shouldBlock = false;
+        let isWhitelistedPage = false; // Track if expiry is on a whitelisted page
+
+        if (currentTab && currentTab.url && isYoutube(currentTab.url)) {
+            const isWhitelisted = await isChannelWhitelisted(currentTab.url);
+            if (!isWhitelisted) {
+                shouldBlock = true;
+            } else {
+               isWhitelistedPage = true; // Timer ended on a whitelisted page
+               // console.log("Timer ended, but current tab is whitelisted. Not blocking.");
+            }
+        }
+
+        // --- Set correct badge state on expiry ---
+        if (shouldBlock) {
+             blockRedirect(); // Redirect happens, badge doesn't matter after this
+             return;
+        } else if (isWhitelistedPage) {
+            setWhitelistBadge(); // Show whitelist badge if timer ended here
+        } else {
+            chrome.action.setBadgeText({"text": ""}); // Clear badge if timer ended on non-YouTube tab
+        }
+        // --- End Badge State Logic ---
+		return; // Stop further execution in this tick
 	}
 
-	// Use chrome.action API for badge updates in MV3
-	chrome.action.setBadgeText({"text": formatTime(timeLeft)});
-    // Optional: Set a background color for the badge when the timer is active
-    chrome.action.setBadgeBackgroundColor({color: "#FF0000"});
+	// --- If timer is still running, update badge with time ---
+	chrome.action.setBadgeText({ "text": formatTime(timeLeft) });
+    chrome.action.setBadgeBackgroundColor({ color: "#FF0000" }); // Ensure red background if timer running
 
-	chrome.storage.local.set({"timeLeft":timeLeft});
+	chrome.storage.local.set({ "timeLeft": timeLeft });
 
 	// Directly send the message. If popup isn't open, it's okay.
 	chrome.runtime.sendMessage({
@@ -382,20 +414,43 @@ function updateTime() {
 }
 
 function startTime() {
-	if (timer != null || noLimit || override || timeLeft <= 0) return; // Don't start if already running, no limit, override, or time is up
-	// console.log("start", timeLeft)
-	// Use chrome.action instead of chrome.browserAction
-	chrome.action.setBadgeBackgroundColor({color: "#FF0000"}); // Red background for timer
-	chrome.action.setBadgeText({"text": formatTime(timeLeft)});
-	timer = setInterval(updateTime, 1000);
+    // Add check: Don't start if current tab is whitelisted
+	if (timer != null || noLimit || override || timeLeft <= 0 ) return;
+
+    // Check current tab whitelist status *before* setting red timer badge
+    chrome.tabs.query({ active: true, currentWindow: true }, async function(tabs) {
+         let preventStart = false;
+         if (tabs && tabs[0] && tabs[0].url && isYoutube(tabs[0].url)) {
+            const isWhitelisted = await isChannelWhitelisted(tabs[0].url);
+            if (isWhitelisted) {
+                preventStart = true;
+                setWhitelistBadge(); // Ensure whitelist badge is shown
+                if (onYoutube) onYoutube = false; // Correct state if it was briefly true
+            }
+         }
+
+         if (preventStart) return; // Don't start timer or set timer badge
+
+         // Original startTime logic if not prevented
+         // console.log("start", timeLeft);
+         chrome.action.setBadgeBackgroundColor({ color: "#FF0000" }); // Red background for timer
+         chrome.action.setBadgeText({ "text": formatTime(timeLeft) });
+         timer = setInterval(updateTime, 1000);
+    });
 }
 
-function stopTime() {
-	// console.log("stopped", timeLeft)
-	clearInterval(timer);
-	timer = null;
-	// Use chrome.action instead of chrome.browserAction
-	chrome.action.setBadgeText({"text": ""});
+function stopTime(isDueToWhitelist = false) {
+    // console.log("stopped", timeLeft);
+    clearInterval(timer);
+    timer = null;
+    // --- Only clear badge if not stopped for a whitelisted page ---
+    if (!isDueToWhitelist) {
+        chrome.action.setBadgeText({ "text": "" });
+        // Optional: Reset background color if needed, although it might be overwritten later.
+        // chrome.action.setBadgeBackgroundColor({color: "#clear"}); // Example, API might need specific color value
+    }
+    // If isDueToWhitelist is true, we assume setWhitelistBadge() was called before this
+    // --- End Badge Logic ---
 }
 
 function formatTime(totalSeconds) {
@@ -639,24 +694,33 @@ function urlNoTime(url) {
 }
 
 async function checkTabForYouTube(url) {
-    // console.log("checkTabForYouTube", url)
-    if (!url) return; // Don't process if URL is invalid
+    // console.log("checkTabForYouTube", url);
+    if (!url) {
+        chrome.action.setBadgeText({ "text": "" }); // Clear badge if URL is invalid
+        return;
+    }
 
     const isCurrentlyYoutube = isYoutube(url);
-    const isWhitelisted = await isChannelWhitelisted(url); // Check whitelist status
-
-    // --- Logic based on current state and whitelist status ---
+    let isWhitelisted = false;
 
     if (isCurrentlyYoutube) {
+        isWhitelisted = await isChannelWhitelisted(url);
+    }
+
+    // --- Logic based on current state and whitelist status ---
+    if (isCurrentlyYoutube) {
         if (isWhitelisted) {
-            // On a whitelisted YouTube page
+            // --- Set Whitelist Badge ---
+            setWhitelistBadge();
+            // --- End Set Whitelist Badge ---
+
             // console.log("On whitelisted channel/video.");
-            if (onYoutube) { // If timer is running, stop it (or check other tabs if focus doesn't matter)
-                if (pauseOutOfFocus || popupOpen) { // Stop immediately if focus matters or popup is open
+            if (onYoutube) { // If timer was running, stop it
+                if (pauseOutOfFocus || popupOpen) {
                     onYoutube = false;
-                    stopTime();
+                    stopTime(true); // Pass flag: stopped due to whitelist
                 } else {
-                    checkWindowsForTimerStop(); // Check if other non-whitelisted tabs are active
+                    checkWindowsForTimerStop();
                 }
             }
             // Ensure override doesn't block navigation *between* whitelisted pages
@@ -677,40 +741,51 @@ async function checkTabForYouTube(url) {
             // On a non-whitelisted YouTube page
             if (noLimit) {
                 // console.log("No limit today.");
-                if(onYoutube) { // Ensure timer is stopped if it was running
-                     onYoutube = false;
-                     stopTime();
+                chrome.action.setBadgeText({ "text": "∞" }); // Show infinity or clear
+                chrome.action.setBadgeBackgroundColor({ color: "#6c757d" }); // Optional: Grey background
+                if (onYoutube) {
+                    onYoutube = false;
+                    stopTime(); // Clear timer badge if switching from timed page
                 }
-                return; // Do nothing if no limit today
+                return;
             }
 
             if (timeLeft <= 0 && !override) {
-                 // console.log("Time is up, blocking.");
-                 blockRedirect(); // Redirect immediately if time is up
-                 return;
+                // console.log("Time is up, blocking.");
+                // blockRedirect will navigate away, badge state after doesn't matter much short-term
+                blockRedirect();
+                return;
             }
 
             if (override) {
-                // console.log("Override is active, checking navigation.");
-                checkOverride(url); // Check if navigation is allowed under override rules
+                // console.log("Override is active");
+                // Keep showing timer/red badge during override on YT page
+                chrome.action.setBadgeText({ "text": formatTime(timeLeft) });
+                chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+                checkOverride(url);
             } else if (!onYoutube) {
                 // console.log("Starting timer.");
                 onYoutube = true;
-                startTime(); // Start timer if not running, not overridden, and time > 0
+                startTime(); // This sets the red timer badge
             } else {
-               // console.log("Timer already running.");
-               // Timer is already running correctly for this non-whitelisted page
+                // console.log("Timer already running.");
+                // Ensure timer badge is still displayed correctly
+                chrome.action.setBadgeText({ "text": formatTime(timeLeft) });
+                chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
             }
         }
     } else {
-        // Not on a YouTube page
+        // --- Not on a YouTube page: Clear badge ---
+        chrome.action.setBadgeText({ "text": "" });
+        // --- End Clear badge ---
+
         // console.log("Not on YouTube.");
-        if (onYoutube && !override) { // Only stop if timer is running and not in override mode
-            if (pauseOutOfFocus || popupOpen) { // Stop immediately if focus matters or popup is open
+        if (onYoutube && !override) {
+            if (pauseOutOfFocus || popupOpen) {
                 onYoutube = false;
-                stopTime();
+                stopTime(); // stopTime will clear the badge text
             } else {
-                checkWindowsForTimerStop(); // Check if other YT tabs are keeping the timer alive
+                checkWindowsForTimerStop();
             }
         }
         // If override is on, leaving YouTube should potentially deactivate temp override for this tab
