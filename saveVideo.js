@@ -1,22 +1,34 @@
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.msg === "getChannelHandleFromPage") {
         let channelHandle = null;
-        // Try finding the handle in common locations on video pages
-        // Selector might need adjustment based on YouTube's current structure
-        let handleElement = document.querySelector("ytd-channel-name #text-container a.yt-simple-endpoint[href^='/@'], a.yt-simple-endpoint.ytd-video-owner-renderer[href^='/@']");
+        let handleElement = null;
 
+        // --- Try multiple selectors ---
+        // 1. Try the itemprop selector first (based on user finding)
+        handleElement = document.querySelector("span[itemprop='author'] link[itemprop='url'][href*='/@']");
+
+        // 2. If not found, try the selectors for modern YouTube elements
+        if (!handleElement) {
+            handleElement = document.querySelector("ytd-channel-name #text-container a.yt-simple-endpoint[href^='/@'], a.yt-simple-endpoint.ytd-video-owner-renderer[href^='/@']");
+        }
+
+        // --- Extract handle if element was found ---
         if (handleElement && handleElement.href) {
              try {
                  const urlPath = new URL(handleElement.href).pathname;
-                 const handleMatch = urlPath.match(/^\/(@[\w.-]+)/); // Match pattern starting with /@
+                 // Extract handle starting with @, potentially after a /
+                 const handleMatch = urlPath.match(/\/(@[\w.-]+)/);
                  if (handleMatch && handleMatch[1]) {
                      channelHandle = handleMatch[1]; // e.g., "@username"
                  }
              } catch(e) {
                  console.error("Error parsing handle link:", e);
              }
+        } else {
+            // console.log("Could not find handle element using known selectors.");
         }
-        // console.log("Content script found handle:", channelHandle);
+
+        // console.log("Content script sending handle:", channelHandle);
         sendResponse({ channelHandle: channelHandle });
         return true; // Keep message channel open for async response
     }
@@ -24,13 +36,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     // Keep existing listener logic for saving video URL
     if (request.msg == "saveVideoURL") {
 		let video = document.getElementsByClassName('video-stream')[0];
-        // Ensure video element exists before accessing properties
         if (video) {
 		    let totalSeconds = Math.floor(video.currentTime);
 		    sendResponse(urlNoTime(location.href) + "&t=" + totalSeconds);
         } else {
-            // Handle case where video element is not found
-            sendResponse(urlNoTime(location.href)); // Send URL without time
+            sendResponse(urlNoTime(location.href));
         }
         return true; // Indicate async response
 	}
