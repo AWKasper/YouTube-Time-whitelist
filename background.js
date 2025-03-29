@@ -169,21 +169,31 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 				// Effectively setting tempOverride to true for currentTab
 				// (by adding the tab id to the tempOverrideTabs array)
 				var tempOverrideTabs = data.tempOverrideTabs;
-				tempOverrideTabs.push(currentTab.id);
+                // Ensure currentTab and its id exist before pushing
+				if(currentTab && currentTab.id) {
+				    tempOverrideTabs.push(currentTab.id);
+				} else {
+				    console.warn("Cannot override: currentTab is invalid.");
+				    // Maybe return or handle this state appropriately
+				    return;
+				}
 
 				var savedVideoURLs = data.savedVideoURLs;
 				if (!savedVideoURLs[currentTab.id])
 					savedVideoURLs[currentTab.id] = "https://www.youtube.com/"; // Placeholder if no URL saved
 
 				chrome.storage.local.set({"override":request.value, "tempOverrideTabs":tempOverrideTabs, "savedVideoURLs":savedVideoURLs}, function() {
-				    // Ensure we redirect only if a valid URL was saved
-					if(savedVideoURLs[currentTab.id] && savedVideoURLs[currentTab.id] !== "https://www.youtube.com/") {
-				        chrome.tabs.update(currentTab.id, {url: savedVideoURLs[currentTab.id]});
-					} else {
-					    // Fallback if no valid URL was saved, maybe redirect to youtube homepage?
-					    // Or simply don't redirect, let the user navigate manually
-					    chrome.tabs.update(currentTab.id, {url: "youtube.com"});
-					}
+				    // Ensure we redirect only if a valid URL was saved and tab exists
+                    chrome.tabs.get(currentTab.id, function(tab) {
+                         if (tab && !chrome.runtime.lastError) {
+                            if(savedVideoURLs[currentTab.id] && savedVideoURLs[currentTab.id] !== "https://www.youtube.com/") {
+                                chrome.tabs.update(currentTab.id, {url: savedVideoURLs[currentTab.id]});
+                            } else {
+                                // Fallback if no valid URL was saved
+                                chrome.tabs.update(currentTab.id, {url: "youtube.com"});
+                            }
+                        }
+                    });
 				});
 			});
 			break;
@@ -295,8 +305,12 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 				checkWindowsForTimerStart();
 			});
 			break;
+        // Add default case or handle unknown messages if necessary
+        default:
+            console.log("Received unknown message:", request.msg);
+            break;
 	}
-	return true; // Indicate async response possible for some messages
+
 });
 
 function isYoutube(url) {
