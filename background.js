@@ -320,21 +320,31 @@ function updateTime() {
 	} else {
 		clearInterval(timer);
 		timer = null;
-		blockRedirect();
-		return; // Stop further execution in this tick
+		blockRedirect(); // Call blockRedirect when time hits 0
+		return; // Stop further execution in this tick after blocking
 	}
-	// Use chrome.action instead of chrome.browserAction
+
+	// Use chrome.action API for badge updates in MV3
 	chrome.action.setBadgeText({"text": formatTime(timeLeft)});
+    // Optional: Set a background color for the badge when the timer is active
+    chrome.action.setBadgeBackgroundColor({color: "#FF0000"});
+
 	chrome.storage.local.set({"timeLeft":timeLeft});
 
-	var views = chrome.extension.getViews({ type: "popup" });
-	if (views.length != 0) {
-		chrome.runtime.sendMessage({
-			msg: "updateTime",
-			time: timeLeft
-		});
-	}
-	checkReset(); // Check reset potentially less often? Maybe only on tab change/focus?
+	// Directly send the message. If popup isn't open, it's okay.
+	chrome.runtime.sendMessage({
+		msg: "updateTime",
+		time: timeLeft
+	}, function(response) {
+        // Optional: Check for errors like "Receiving end does not exist" if needed,
+        // but usually it's fine to ignore if the popup isn't open.
+        if (chrome.runtime.lastError) {
+            // console.log("Popup not open or error sending message:", chrome.runtime.lastError.message);
+        }
+	});
+
+	// Consider if checkReset() needs to run every second. Maybe less often?
+	checkReset();
 }
 
 function startTime() {
