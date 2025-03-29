@@ -350,10 +350,12 @@ function updateTime() {
 		msg: "updateTime",
 		time: timeLeft
 	}, function(response) {
-        // Optional: Check for errors like "Receiving end does not exist" if needed,
-        // but usually it's fine to ignore if the popup isn't open.
-        if (chrome.runtime.lastError) {
-            // console.log("Popup not open or error sending message:", chrome.runtime.lastError.message);
+        // Optional: Check for the specific error to avoid logging it, but otherwise ignore.
+        if (chrome.runtime.lastError && chrome.runtime.lastError.message === "Could not establish connection. Receiving end does not exist.") {
+           // Expected error when popup is not open, ignore silently.
+        } else if (chrome.runtime.lastError) {
+            // Log other unexpected errors
+            console.warn("sendMessage error:", chrome.runtime.lastError.message);
         }
 	});
 
