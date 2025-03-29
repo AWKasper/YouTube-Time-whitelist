@@ -1,28 +1,42 @@
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-    if (request.msg === "getChannelIdFromPage") {
-        let channelLink = document.querySelector("ytd-video-owner-renderer #channel-name a, yt-formatted-string.ytd-channel-name a"); // Find channel link
-        let channelId = null;
-        if (channelLink && channelLink.href) {
+    if (request.msg === "getChannelHandleFromPage") {
+        let channelHandle = null;
+        // Try finding the handle in common locations on video pages
+        // Selector might need adjustment based on YouTube's current structure
+        let handleElement = document.querySelector("ytd-channel-name #text-container a.yt-simple-endpoint[href^='/@'], a.yt-simple-endpoint.ytd-video-owner-renderer[href^='/@']");
+
+        if (handleElement && handleElement.href) {
              try {
-                 const urlParts = new URL(channelLink.href).pathname.split('/');
-                 const channelIndex = urlParts.findIndex(part => part === 'channel');
-                 if (channelIndex !== -1 && urlParts.length > channelIndex + 1 && urlParts[channelIndex + 1].startsWith('UC')) {
-                     channelId = urlParts[channelIndex + 1];
+                 const urlPath = new URL(handleElement.href).pathname;
+                 const handleMatch = urlPath.match(/^\/(@[\w.-]+)/); // Match pattern starting with /@
+                 if (handleMatch && handleMatch[1]) {
+                     channelHandle = handleMatch[1]; // e.g., "@username"
                  }
-                 // Add checks for /c/ or /user/ if needed
-             } catch(e) {}
+             } catch(e) {
+                 console.error("Error parsing handle link:", e);
+             }
         }
-        sendResponse({ channelId: channelId });
+        // console.log("Content script found handle:", channelHandle);
+        sendResponse({ channelHandle: channelHandle });
         return true; // Keep message channel open for async response
     }
-    // Keep existing listener logic here...
+
+    // Keep existing listener logic for saving video URL
     if (request.msg == "saveVideoURL") {
 		let video = document.getElementsByClassName('video-stream')[0];
-		let totalSeconds = Math.floor(video.currentTime);
-		sendResponse(urlNoTime(location.href) + "&t=" + totalSeconds)
+        // Ensure video element exists before accessing properties
+        if (video) {
+		    let totalSeconds = Math.floor(video.currentTime);
+		    sendResponse(urlNoTime(location.href) + "&t=" + totalSeconds);
+        } else {
+            // Handle case where video element is not found
+            sendResponse(urlNoTime(location.href)); // Send URL without time
+        }
+        return true; // Indicate async response
 	}
 });
 
-function urlNoTime(url) { // Ensure this function exists
+function urlNoTime(url) {
+    if (!url) return null;
 	return url.split("&t=")[0];
 }

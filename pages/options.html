@@ -154,23 +154,21 @@
 			<input id="youtubekidsEnabled" class="big-checkbox ml-2" type="checkbox">
 		</div>
 
-		<hr> <h4>Whitelisted Channels</h4>
+		<hr>
+		<h4>Whitelisted Channels (by Handle)</h4>
         <p style="max-width: 600px; margin: auto; margin-bottom: 1rem;">
-            Add YouTube Channel IDs below to exclude their videos and channel pages from the timer.
-            You need the ID that starts with "UC...", not the channel name or handle.
-            You can usually find this ID in the URL of the channel's homepage (e.g., youtube.com/*...).
-            If the URL shows a name (e.g., /c/ChannelName or /@handle), you may need to view the page source or use online tools to find the underlying "UC..." ID.
+            Add YouTube Channel Handles (e.g., @google) below to exclude their videos and channel pages from the timer.
+            The handle is usually visible in the channel's URL or on their page.
         </p>
 		<div class="form-row align-items-center justify-content-center mb-3">
 			<div class="col-auto">
-				<label for="whitelistChannelId" class="sr-only">Channel ID</label>
-				<input type="text" class="form-control mb-2" id="whitelistChannelId" placeholder="Enter Channel ID (UC...)">
+				<label for="whitelistChannelHandle" class="sr-only">Channel Handle</label>
+				<input type="text" class="form-control mb-2" id="whitelistChannelHandle" placeholder="Enter Channel Handle (e.g., @google)">
 			</div>
 			<div class="col-auto">
-				<button type="button" id="addWhitelistBtn" class="btn btn-primary mb-2">Add Channel</button>
-			</div>
+				<button type="button" id="addWhitelistBtn" class="btn btn-primary mb-2">Add Handle</button> </div>
 		</div>
-		<ul id="whitelist" class="list-group mb-3" style="max-width: 400px; margin: auto;">
+		<ul id="whitelistHandles" class="list-group mb-3" style="max-width: 400px; margin: auto;">
 			</ul>
 	</div>
 	<script type="text/javascript" src="../js/options.js"></script>

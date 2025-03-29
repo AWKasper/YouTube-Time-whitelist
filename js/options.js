@@ -237,23 +237,24 @@ $(".save-day-limit").click(function() {
 	ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated ' + day + ' time limit', eventValue: minutes});
 });
 
-const whitelistInput = document.getElementById('whitelistChannelId');
+const storageKey = "whitelistedHandles";
+const whitelistInput = document.getElementById('whitelistChannelHandle');
 const addWhitelistBtn = document.getElementById('addWhitelistBtn');
-const whitelistUl = document.getElementById('whitelist');
+const whitelistUl = document.getElementById('whitelistHandles');
 
 // Function to render the whitelist from storage
 function renderWhitelist() {
-    chrome.storage.local.get({ "whitelistedChannels": [] }, function(data) {
+    chrome.storage.local.get({ [storageKey]: [] }, function(data) { // Use dynamic key
         whitelistUl.innerHTML = ''; // Clear current list
-        data.whitelistedChannels.forEach(channelId => {
+        data[storageKey].forEach(channelHandle => {
             const li = document.createElement('li');
             li.className = 'list-group-item d-flex justify-content-between align-items-center';
-            li.textContent = channelId;
+            li.textContent = channelHandle; // Display the handle
 
             const removeBtn = document.createElement('button');
             removeBtn.className = 'btn btn-danger btn-sm remove-whitelist-btn';
             removeBtn.textContent = 'Remove';
-            removeBtn.dataset.channelId = channelId; // Store channelId for removal
+            removeBtn.dataset.channelHandle = channelHandle; // Store handle for removal
 
             li.appendChild(removeBtn);
             whitelistUl.appendChild(li);
@@ -263,37 +264,43 @@ function renderWhitelist() {
 
 // Function to add a channel to the whitelist
 function addChannelToWhitelist() {
-    const channelId = whitelistInput.value.trim();
-    // Basic validation for YouTube channel ID format (UC followed by 22 chars)
-    if (/^UC[A-Za-z0-9_\-]{22}$/.test(channelId)) {
-        chrome.storage.local.get({ "whitelistedChannels": [] }, function(data) {
-            const currentWhitelist = data.whitelistedChannels;
-            if (!currentWhitelist.includes(channelId)) {
-                currentWhitelist.push(channelId);
-                chrome.storage.local.set({ "whitelistedChannels": currentWhitelist }, function() {
+    let channelHandle = whitelistInput.value.trim();
+
+    // Basic validation for YouTube channel handle format (starts with @)
+    if (channelHandle.length > 1 && channelHandle.startsWith('@')) {
+         // Optionally remove leading '/' if user included it (e.g. from URL)
+         if (channelHandle.startsWith('/@')) {
+             channelHandle = channelHandle.substring(1);
+         }
+
+        chrome.storage.local.get({ [storageKey]: [] }, function(data) { // Use dynamic key
+            const currentWhitelist = data[storageKey];
+            if (!currentWhitelist.includes(channelHandle)) {
+                currentWhitelist.push(channelHandle);
+                chrome.storage.local.set({ [storageKey]: currentWhitelist }, function() { // Use dynamic key
                     whitelistInput.value = ''; // Clear input
                     renderWhitelist(); // Re-render the list
-                    alert('Channel added to whitelist.');
-                     ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Add', eventLabel: channelId});
+                    alert('Channel handle added to whitelist.');
+                     ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Add Handle', eventLabel: channelHandle});
                 });
             } else {
-                alert('Channel is already whitelisted.');
+                alert('Channel handle is already whitelisted.');
             }
         });
     } else {
-        alert('Invalid YouTube Channel ID format. It should start with "UC" followed by 22 characters.');
+        alert('Invalid YouTube Channel Handle format. It should start with "@" (e.g., @google).');
     }
 }
 
 // Function to remove a channel from the whitelist
-function removeChannelFromWhitelist(channelIdToRemove) {
-    chrome.storage.local.get({ "whitelistedChannels": [] }, function(data) {
-        const currentWhitelist = data.whitelistedChannels;
-        const updatedWhitelist = currentWhitelist.filter(id => id !== channelIdToRemove);
-        chrome.storage.local.set({ "whitelistedChannels": updatedWhitelist }, function() {
+function removeChannelFromWhitelist(handleToRemove) {
+    chrome.storage.local.get({ [storageKey]: [] }, function(data) { // Use dynamic key
+        const currentWhitelist = data[storageKey];
+        const updatedWhitelist = currentWhitelist.filter(handle => handle !== handleToRemove);
+        chrome.storage.local.set({ [storageKey]: updatedWhitelist }, function() { // Use dynamic key
             renderWhitelist(); // Re-render the list
-            alert('Channel removed from whitelist.');
-            ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Remove', eventLabel: channelIdToRemove});
+            alert('Channel handle removed from whitelist.');
+            ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Remove Handle', eventLabel: handleToRemove});
         });
     });
 }
@@ -306,13 +313,13 @@ addWhitelistBtn.addEventListener('click', addChannelToWhitelist);
 // Listener for remove buttons (using event delegation)
 whitelistUl.addEventListener('click', function(event) {
     if (event.target.classList.contains('remove-whitelist-btn')) {
-        const channelId = event.target.dataset.channelId;
-        if (confirm(`Are you sure you want to remove channel ${channelId} from the whitelist?`)) {
-            removeChannelFromWhitelist(channelId);
+        // Get handle from data attribute
+        const channelHandle = event.target.dataset.channelHandle;
+        if (confirm(`Are you sure you want to remove channel handle ${channelHandle} from the whitelist?`)) {
+            removeChannelFromWhitelist(channelHandle);
         }
     }
 });
-
 
 // Initial rendering of the whitelist when the options page loads
 document.addEventListener('DOMContentLoaded', renderWhitelist);

@@ -1,5 +1,3 @@
-console.log("background running")
-
 chrome.runtime.onInstalled.addListener(function (object) {
 	if (object.reason === chrome.runtime.OnInstalledReason.INSTALL) {
 		chrome.tabs.create({url: "/pages/options.html"});
@@ -17,7 +15,7 @@ var youtubekidsEnabled = true;
 var checkBrowserFocusTimer = null;
 var timer = null;
 var noLimit = false;
-var whitelistedChannels = [];
+var whitelistedHandles = [];
 
 // chrome.storage.local.set({"lastDate":(new Date().getDate()-1).toString()}); //for debugging
 
@@ -37,9 +35,10 @@ chrome.storage.local.get({"customizeLimits":false, "dayLimits":{}}, function(dat
 
 // Function to load/update the whitelist cache
 function updateWhitelistCache() {
-    chrome.storage.local.get({ "whitelistedChannels": [] }, function(data) {
-        whitelistedChannels = data.whitelistedChannels;
-        // console.log("Whitelist cache updated:", whitelistedChannels); // For debugging
+    // IMPORTANT: Ensure options.js saves to "whitelistedHandles" now
+    chrome.storage.local.get({ "whitelistedHandles": [] }, function(data) {
+        whitelistedHandles = data.whitelistedHandles;
+        // console.log("Whitelist cache updated:", whitelistedHandles);
     });
 }
 
@@ -47,9 +46,9 @@ function updateWhitelistCache() {
 updateWhitelistCache();
 // Also, listen for storage changes to keep the cache updated
 chrome.storage.onChanged.addListener(function(changes, namespace) {
-  if (namespace === 'local' && changes.whitelistedChannels) {
-    updateWhitelistCache();
-  }
+	if (namespace === 'local' && changes.whitelistedHandles) { // Changed key name
+	  updateWhitelistCache();
+	}
 });
 
 chrome.storage.local.get({"override":override, "pauseOutOfFocus":pauseOutOfFocus, "youtubekidsEnabled":youtubekidsEnabled}, function(data) {
@@ -102,6 +101,25 @@ chrome.tabs.onRemoved.addListener(function(tabId, removeInfo) {
 		});
 	}
 });
+
+function getHandleFromUrl(tabUrl) {
+    if (!tabUrl) return null;
+    try {
+        const urlObj = new URL(tabUrl);
+        const pathParts = urlObj.pathname.split('/');
+        // Look for /@handle format
+        if (pathParts.length > 1 && pathParts[1].startsWith('@')) {
+            // Basic validation: ensure it's just the handle part
+            if (/^@[\w.-]+$/.test(pathParts[1])) {
+                 return pathParts[1]; // e.g., "@username"
+            }
+        }
+        // Add checks for other potential URL structures if needed
+    } catch (e) {
+        // console.error("Error parsing URL for handle:", e);
+    }
+    return null;
+}
 
 function checkBrowserFocus(){
 	if(typeof timer != 'undefined') {
@@ -733,39 +751,34 @@ function getChannelIdFromUrl(tabUrl) {
     return null; // Return null if no standard channel ID found directly in the URL path
 }
 
+// Updated function to check whitelist based on @handle
 async function isChannelWhitelisted(tabUrl) {
-    // 1. Check direct URL for /channel/UC...
-    const channelIdFromUrl = getChannelIdFromUrl(tabUrl);
-    if (channelIdFromUrl && whitelistedChannels.includes(channelIdFromUrl)) {
-        // console.log(`Channel ${channelIdFromUrl} from URL is whitelisted.`);
+    // 1. Check direct URL for /@handle
+    const handleFromUrl = getHandleFromUrl(tabUrl);
+    if (handleFromUrl && whitelistedHandles.includes(handleFromUrl)) {
+        // console.log(`Handle ${handleFromUrl} from URL is whitelisted.`);
         return true;
     }
 
-    // 2. If it's a video page, try asking the content script (more reliable)
+    // 2. If it's a video page, ask the content script for the handle
     if (isYoutubeVideo(tabUrl) && currentTab && currentTab.id) {
         try {
-            // Make sure to handle potential errors if the content script isn't ready
-            const response = await chrome.tabs.sendMessage(currentTab.id, { msg: "getChannelIdFromPage" });
-            if (response && response.channelId && whitelistedChannels.includes(response.channelId)) {
-                // console.log(`Channel ${response.channelId} from video page content script is whitelisted.`);
+            // Send message to get the handle from the page content
+            const response = await chrome.tabs.sendMessage(currentTab.id, { msg: "getChannelHandleFromPage" });
+            if (response && response.channelHandle && whitelistedHandles.includes(response.channelHandle)) {
+                // console.log(`Handle ${response.channelHandle} from video page content script is whitelisted.`);
                 return true;
             }
         } catch (e) {
-             // Ignore errors like "Could not establish connection..." if content script is not injected/ready yet.
              if (!e.message.includes("Could not establish connection") && !e.message.includes("Receiving end does not exist")) {
-                // Log other unexpected errors
-                // console.warn("Error messaging content script for channel ID:", e);
+                // console.warn("Error messaging content script for channel handle:", e);
              }
         }
     }
 
-    // 3. Add checks for other URL types if necessary (e.g., /@handle might need content script too)
-
-    // console.log("URL/Channel not found in whitelist:", tabUrl);
+    // console.log("URL/Handle not found in whitelist:", tabUrl);
     return false;
 }
-
-
 
 async function checkWindowsForTimerStart() { // Make async
 	if (timer != null || noLimit || override || timeLeft <= 0) return; // Added checks
