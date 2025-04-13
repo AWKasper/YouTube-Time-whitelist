@@ -1,325 +1,404 @@
 ga('send', 'pageview', '/options.html');
 
-chrome.storage.local.get({"limitOverrides":true}, function(data) {
-	if (data.limitOverrides == true) {
-		$('#limitOverrides').prop('checked', true);
-		$('#overrideLimitRow').css("visibility", "visible");
-	}
-});
+let settingsChanged = false; // Flag to track unsaved changes
+const statusMessageEl = document.getElementById('statusMessage'); // For showing save status
 
-chrome.storage.local.get({"timeLimit":30}, function(data) {
-	$("#minutes").val(data.timeLimit);
-});
-
-function populateDayLimits() {
-	chrome.storage.local.get({"dayLimits":{}, "timeLimit":30}, function(data) {
-		var dayLimits = data.dayLimits;
-		var dayDivs = $(".day-row").each(function(i) {
-			var day = $(this).data("day");
-			var minuteInput = $(this).find(".day-minute-input");
-			if (day in dayLimits) {
-				if (dayLimits[day] === false) {
-					$(this).find(".save-day-limit, .day-minute-input").prop("disabled", true);
-					$(this).find(".no-limit-input").prop('checked', true);
-				} else {
-					minuteInput.val(dayLimits[day]);
-				}
-			} else {
-				minuteInput.val(data.timeLimit);
-			}
-		});
-
-		$("#customLimitsDiv").show();
-	});
+// --- Utility Functions ---
+function setSettingsChanged() {
+	settingsChanged = true;
+    statusMessageEl.textContent = ''; // Clear status on new change
+    // console.log("Settings changed"); // For debugging
 }
 
-chrome.storage.local.get({"customizeLimits":false}, function(data) {
-	if (data.customizeLimits == true) {
-		$('#customizeLimits').prop('checked', true);
-		$("#minutes, #saveMinutes").prop("disabled", true);
-		populateDayLimits();
-	}
-});
+function clearStatusMessage() {
+    setTimeout(() => {
+        statusMessageEl.textContent = '';
+    }, 3000); // Clears the message after 3 seconds
+}
 
-chrome.storage.local.get({"pauseOutOfFocus":true}, function(data) {
-	if (data.pauseOutOfFocus == true)
-		$('#pauseOutOfFocus').prop('checked', true);
-});
+// --- Load Initial Settings ---
 
-chrome.storage.local.get({"youtubekidsEnabled":true}, function(data) {
-	if (data.youtubekidsEnabled == true)
-		$('#youtubekidsEnabled').prop('checked', true);
-});
+function loadSettings() {
+    chrome.storage.local.get({
+        "timeLimit": 30,
+        "customizeLimits": false,
+        "dayLimits": {},
+        "resetTime": "00:00",
+        "limitOverrides": true,
+        "overrideLimit": 5,
+        "pauseOutOfFocus": true,
+        "youtubekidsEnabled": true,
+        [storageKey]: [] // Include whitelist handles
+    }, function(data) {
+        // General Time Limit
+        $("#minutes").val(data.timeLimit);
 
-chrome.storage.local.get({"overrideLimit":5}, function(data) {
-	$("#overrideLimit").val(data.overrideLimit);
-});
+        // Customize Limits Checkbox & Section
+        $('#customizeLimits').prop('checked', data.customizeLimits);
+        if (data.customizeLimits) {
+            $("#customLimitsDiv").show();
+            $("#minutes, #saveMinutes").prop("disabled", true); // Keep general limit disabled visually
+            populateDayLimits(data.dayLimits, data.timeLimit); // Pass defaults
+        } else {
+            $("#customLimitsDiv").hide();
+            $("#minutes, #saveMinutes").prop("disabled", false);
+        }
 
+        // Reset Time
+        $("#time").val(data.resetTime);
 
-chrome.storage.local.get({"resetTime":"00:00"}, function(data) {
-	$("#time").val(data.resetTime);
-});
+        // Limit Overrides Checkbox & Section
+        $('#limitOverrides').prop('checked', data.limitOverrides);
+        if (data.limitOverrides) {
+            $('#overrideLimitRow').css("visibility", "visible");
+            $("#overrideLimit").val(data.overrideLimit);
+        } else {
+            $('#overrideLimitRow').css("visibility", "hidden");
+        }
 
-$("#saveMinutes").click(function() {
-	let minutes = Number($("#minutes").val());
+        // Pause Out of Focus
+        $('#pauseOutOfFocus').prop('checked', data.pauseOutOfFocus);
 
-	if (minutes % 0.5 != 0) {
-		minutes = Math.round(minutes*2)/2; //rounds to nearest 0.5
-	}
+        // YouTube Kids Enabled
+        $('#youtubekidsEnabled').prop('checked', data.youtubekidsEnabled);
 
-	if (minutes < 0) {
-		minutes = 0; 
-	} else if (minutes > 1439) {
-		minutes = 1439;
-	}
-	$("#minutes").val(minutes);
-	ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated time limit', eventValue: minutes});
+        // Render Whitelist (using existing function)
+        renderWhitelist(data[storageKey]); // Pass the loaded handles
 
-	chrome.storage.local.set({"timeLimit": minutes, "timeLeft": minutes*60}, function() {
-		chrome.runtime.sendMessage({
-			msg: "timeLimitUpdated"
-		});
-		alert("Limit Saved");
-	});
-});
+        // Add change listeners AFTER loading initial values
+        addChangeListeners();
 
-$("#saveOverrideLimit").click(function() {
-	let overrideLimit = Number($("#overrideLimit").val());
-	if (overrideLimit < 0) {
-		overrideLimit = 0;
-	} else if (overrideLimit > 1000) {
-		overrideLimit = 1000;
-	}
-	$("#overrideLimit").val(overrideLimit);
-	ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated override limit', eventValue: overrideLimit});
-
-	chrome.storage.local.set({"overrideLimit": overrideLimit, "currentOverrideCount": overrideLimit}, function() {
-		alert("Override Limit Saved");
-	});
-});
-
-$("#saveTime").click(function() {
-	var resetTime = $("#time").val();
-	var resetHour = parseInt(resetTime.split(":")[0]);
-	var resetMinute = parseInt(resetTime.split(":")[1]);
-	ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated reset time', eventLabel: resetTime, eventValue: resetHour*60+resetMinute});
-	chrome.storage.local.set({"resetTime": resetTime}, function() {
-		chrome.runtime.sendMessage({
-			msg: "resetTimeUpdated"
-		});
-		alert("Time Saved");
-	});
-});
+        // Reset change flag after loading
+        settingsChanged = false;
+    });
+}
 
 
-$('#pauseOutOfFocus').change(function() {
-	if (this.checked) {
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated pause out of focus', eventLabel: "true", eventValue: 1});
-		chrome.storage.local.set({"pauseOutOfFocus": true});
-		chrome.runtime.sendMessage({msg: "pauseOutOfFocus", val: true});
-	} else {
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated pause out of focus', eventLabel: "false", eventValue: 0});
-		chrome.storage.local.set({"pauseOutOfFocus": false});
-		chrome.runtime.sendMessage({msg: "pauseOutOfFocus", val: false});
-	}
-});
+function populateDayLimits(dayLimits, defaultTimeLimit) {
+    // No need to get from storage again, use passed data
+    $(".day-row").each(function() {
+        var day = $(this).data("day");
+        var minuteInput = $(this).find(".day-minute-input");
+        var noLimitInput = $(this).find(".no-limit-input");
+        // var saveButton = $(this).find(".save-day-limit"); // No longer needed
 
-$('#youtubekidsEnabled').change(function() {
-	if (this.checked) {
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated YouTube Kids enabled', eventLabel: "true", eventValue: 1});
-		chrome.storage.local.set({"youtubekidsEnabled": true});
-		chrome.runtime.sendMessage({msg: "youtubekidsEnabled", val: true});
-	} else {
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated YouTube Kids enabled', eventLabel: "false", eventValue: 0});
-		chrome.storage.local.set({"youtubekidsEnabled": false});
-		chrome.runtime.sendMessage({msg: "youtubekidsEnabled", val: false});
-	}
-});
+        if (day in dayLimits) {
+            if (dayLimits[day] === false) { // No limit set for this day
+                // saveButton.prop("disabled", true); // No longer needed
+                minuteInput.prop("disabled", true).val(''); // Clear and disable
+                noLimitInput.prop('checked', true);
+            } else { // Specific limit set for this day
+                minuteInput.val(dayLimits[day]).prop("disabled", false);
+                // saveButton.prop("disabled", false); // No longer needed
+                noLimitInput.prop('checked', false);
+            }
+        } else { // No specific setting, use default
+            minuteInput.val(defaultTimeLimit).prop("disabled", false);
+            // saveButton.prop("disabled", false); // No longer needed
+            noLimitInput.prop('checked', false);
+        }
+    });
+    // No need for $("#customLimitsDiv").show(); here, done in loadSettings
+}
 
-$('#limitOverrides').change(function() {
-	if (this.checked) {
-		$('#overrideLimitRow').css("visibility", "visible");
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated limit overrides toggle', eventLabel: "true", eventValue: 1});
-		chrome.storage.local.set({"limitOverrides": true});
-	} else {
-		$('#overrideLimitRow').css("visibility", "hidden");
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated limit overrides toggle', eventLabel: "false", eventValue: 0});
-		chrome.storage.local.set({"limitOverrides": false});
-	}
-});
-
-$("#customizeLimits").change(function() {
-	if (this.checked) {
-		chrome.storage.local.set({"customizeLimits": true});
-		$("#customLimitsDiv").show();
-		$("#minutes, #saveMinutes").prop("disabled", true);
-
-		chrome.storage.local.get({"timeLimit":30}, function(data) {
-			$("#minutes").val(data.timeLimit);
-		});
-		populateDayLimits();
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated customize limits', eventLabel: "true", eventValue: 1});
-	} else {
-		chrome.storage.local.set({"customizeLimits": false});
-		$("#customLimitsDiv").hide();
-		$("#minutes, #saveMinutes").prop("disabled", false);
-
-		chrome.storage.local.set({"dayLimits":{}});
-		$(".day-minute-input").val("");
-		$(".no-limit-input").prop('checked', false);
-		$(".save-day-limit, .day-minute-input").prop("disabled", false);
-		chrome.runtime.sendMessage({
-			msg: "customizeLimitsFalse"
-		});
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated customize limits', eventLabel: "false", eventValue: 0});
-	}
-});
-
-$(".no-limit-input").change(function() {
-	var day = $(this).closest(".day-row").data("day");
-	if (this.checked) {
-		$(this).closest(".day-row").find(".save-day-limit, .day-minute-input").prop("disabled", true);
-		$(this).closest(".day-row").find(".day-minute-input").val("");
-		chrome.storage.local.get({"dayLimits":{}}, function(data) {
-			data.dayLimits[day] = false;
-			chrome.storage.local.set({"dayLimits": data.dayLimits}, function() {
-				chrome.runtime.sendMessage({
-					msg: "noLimitInputChange",
-					day: day
-				});	
-			});
-		});
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated ' + day + ' no limit', eventLabel: "true", eventValue: 1});
-	} else {
-		var noLimitInput = $(this);
-		chrome.storage.local.get({"dayLimits":{}, "timeLimit":30}, function(data) {
-			delete data.dayLimits[day];
-			chrome.storage.local.set({"dayLimits": data.dayLimits}, function() {
-				chrome.runtime.sendMessage({
-					msg: "noLimitInputChange",
-					day: day
-				});	
-			});
-			noLimitInput.closest(".day-row").find(".day-minute-input").val(data.timeLimit);
-			noLimitInput.closest(".day-row").find(".save-day-limit, .day-minute-input").prop("disabled", false);
-		});
-		ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated ' + day + ' no limit', eventLabel: "false", eventValue: 0});
-	}
-});
-
-$(".save-day-limit").click(function() {
-	var day = $(this).closest(".day-row").data("day");
-	var dayUpperCase = $(this).closest(".day-row").find(".day-label").text();
-	var minuteInput = $(this).closest(".day-row").find(".day-minute-input");
-	var minutes = Number(minuteInput.val());
-
-	if (minutes % 0.5 != 0) {
-		minutes = Math.round(minutes*2)/2; //rounds to nearest 0.5
-	}
-
-	if (minutes < 0) {
-		minutes = 0; 
-	} else if (minutes > 1439) {
-		minutes = 1439;
-	}
-	minuteInput.val(minutes);
-
-	chrome.storage.local.get({"dayLimits":{}}, function(data) {
-		data.dayLimits[day] = minutes;
-		chrome.storage.local.set({"dayLimits": data.dayLimits}, function() {
-			chrome.runtime.sendMessage({
-				msg: "dayTimeLimitUpdated",
-				day: day
-			});
-			alert(dayUpperCase + " Limit Saved");
-		});
-	});
-	ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Updated ' + day + ' time limit', eventValue: minutes});
-});
-
+// --- Whitelist Variables & Functions (Keep existing logic, modify add/remove) ---
 const storageKey = "whitelistedHandles";
 const whitelistInput = document.getElementById('whitelistChannelHandle');
 const addWhitelistBtn = document.getElementById('addWhitelistBtn');
 const whitelistUl = document.getElementById('whitelistHandles');
 
-// Function to render the whitelist from storage
-function renderWhitelist() {
-    chrome.storage.local.get({ [storageKey]: [] }, function(data) { // Use dynamic key
-        whitelistUl.innerHTML = ''; // Clear current list
-        data[storageKey].forEach(channelHandle => {
-            const li = document.createElement('li');
-            li.className = 'list-group-item d-flex justify-content-between align-items-center';
-            li.textContent = channelHandle; // Display the handle
+// Function to render the whitelist from storage (Modified to accept data)
+function renderWhitelist(handles) {
+    whitelistUl.innerHTML = ''; // Clear current list
+    handles.forEach(channelHandle => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+        li.textContent = channelHandle;
 
-            const removeBtn = document.createElement('button');
-            removeBtn.className = 'btn btn-danger btn-sm remove-whitelist-btn';
-            removeBtn.textContent = 'Remove';
-            removeBtn.dataset.channelHandle = channelHandle; // Store handle for removal
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn btn-danger btn-sm remove-whitelist-btn';
+        removeBtn.textContent = 'Remove';
+        removeBtn.dataset.channelHandle = channelHandle;
 
-            li.appendChild(removeBtn);
-            whitelistUl.appendChild(li);
-        });
+        li.appendChild(removeBtn);
+        whitelistUl.appendChild(li);
     });
 }
 
-// Function to add a channel to the whitelist
+// Function to add a channel to the whitelist (Modified to set flag)
 function addChannelToWhitelist() {
     let channelHandle = whitelistInput.value.trim();
 
-    // Basic validation for YouTube channel handle format (starts with @)
     if (channelHandle.length > 1 && channelHandle.startsWith('@')) {
-         // Optionally remove leading '/' if user included it (e.g. from URL)
-         if (channelHandle.startsWith('/@')) {
+        if (channelHandle.startsWith('/@')) {
              channelHandle = channelHandle.substring(1);
          }
-
-        chrome.storage.local.get({ [storageKey]: [] }, function(data) { // Use dynamic key
+        chrome.storage.local.get({ [storageKey]: [] }, function(data) {
             const currentWhitelist = data[storageKey];
             if (!currentWhitelist.includes(channelHandle)) {
-                currentWhitelist.push(channelHandle);
-                chrome.storage.local.set({ [storageKey]: currentWhitelist }, function() { // Use dynamic key
-                    whitelistInput.value = ''; // Clear input
-                    renderWhitelist(); // Re-render the list
-                    alert('Channel handle added to whitelist.');
-                     ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Add Handle', eventLabel: channelHandle});
-                });
+                // Don't save here, just update UI and mark as changed
+                currentWhitelist.push(channelHandle); // Add to local copy for rendering
+                whitelistInput.value = '';
+                renderWhitelist(currentWhitelist); // Re-render based on local copy
+                setSettingsChanged(); // Mark settings as changed
+                statusMessageEl.textContent = 'Handle added to list (not saved yet).';
+                clearStatusMessage();
+                 // ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Add Handle Pending', eventLabel: channelHandle});
             } else {
-                alert('Channel handle is already whitelisted.');
+                statusMessageEl.textContent = 'Channel handle is already in the list.';
+                 clearStatusMessage();
             }
         });
     } else {
-        alert('Invalid YouTube Channel Handle format. It should start with "@" (e.g., @google).');
+        statusMessageEl.textContent = 'Invalid YouTube Channel Handle format. It should start with "@" (e.g., @google).';
+        clearStatusMessage();
     }
 }
 
-// Function to remove a channel from the whitelist
+// Function to remove a channel from the whitelist (Modified to set flag)
 function removeChannelFromWhitelist(handleToRemove) {
-    chrome.storage.local.get({ [storageKey]: [] }, function(data) { // Use dynamic key
-        const currentWhitelist = data[storageKey];
-        const updatedWhitelist = currentWhitelist.filter(handle => handle !== handleToRemove);
-        chrome.storage.local.set({ [storageKey]: updatedWhitelist }, function() { // Use dynamic key
-            renderWhitelist(); // Re-render the list
-            alert('Channel handle removed from whitelist.');
-            ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Remove Handle', eventLabel: handleToRemove});
+    // Don't get/set storage here, just update UI and mark as changed
+     const currentItems = Array.from(whitelistUl.querySelectorAll('li'));
+     const updatedWhitelist = currentItems
+         .map(li => li.firstChild.textContent) // Get the handle text
+         .filter(handle => handle !== handleToRemove);
+
+     renderWhitelist(updatedWhitelist); // Re-render based on filtered list
+     setSettingsChanged(); // Mark settings as changed
+     statusMessageEl.textContent = 'Handle removed from list (not saved yet).';
+     clearStatusMessage();
+     // ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Remove Handle Pending', eventLabel: handleToRemove});
+}
+
+// --- Event Handlers ---
+
+function handleCustomizeLimitsChange() {
+    if (this.checked) {
+        $("#customLimitsDiv").show();
+        $("#minutes").prop("disabled", true); // Visually disable general limit
+        // Get current general limit to populate defaults
+        chrome.storage.local.get({"timeLimit": 30, "dayLimits": {}}, function(data){
+             populateDayLimits(data.dayLimits, data.timeLimit); // Populate with current defaults
         });
+    } else {
+        $("#customLimitsDiv").hide();
+        $("#minutes").prop("disabled", false);
+        // Optionally clear day-specific inputs visually when disabling
+        $(".day-minute-input").val("");
+        $(".no-limit-input").prop('checked', false);
+		$(".save-day-limit, .day-minute-input").prop("disabled", false);
+    }
+    setSettingsChanged();
+}
+
+function handleNoLimitChange() {
+    var dayRow = $(this).closest(".day-row");
+	var minuteInput = dayRow.find(".day-minute-input");
+	// var saveButton = dayRow.find(".save-day-limit"); // No longer needed
+
+	if (this.checked) {
+		minuteInput.prop("disabled", true).val(''); // Disable and clear input
+		// saveButton.prop("disabled", true); // No longer needed
+	} else {
+        // Re-enable and set default value (read from general input for immediate feedback)
+        let defaultMinutes = $("#minutes").val() || 30;
+		minuteInput.prop("disabled", false).val(defaultMinutes);
+		// saveButton.prop("disabled", false); // No longer needed
+	}
+    setSettingsChanged();
+}
+
+function handleLimitOverridesChange() {
+	if (this.checked) {
+		$('#overrideLimitRow').css("visibility", "visible");
+	} else {
+		$('#overrideLimitRow').css("visibility", "hidden");
+	}
+    setSettingsChanged();
+}
+
+// --- Save All Settings ---
+
+function saveAllSettings() {
+    statusMessageEl.textContent = 'Saving...';
+
+    // 1. General Time Limit (always read, used if customizeLimits is false)
+    let timeLimit = Number($("#minutes").val());
+    timeLimit = Math.max(0, Math.min(1439, Math.round(timeLimit * 2) / 2)); // Validation
+    $("#minutes").val(timeLimit); // Update input to validated value
+
+    // 2. Customize Limits Checkbox and Individual Day Limits
+    const customizeLimits = $('#customizeLimits').is(':checked');
+    let dayLimits = {};
+    let activeDayLimits = {}; // Store limits actually being used today/for messaging
+    const today = new Date();
+	const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const todayDayName = days[today.getDay()];
+
+
+    if (customizeLimits) {
+        $(".day-row").each(function() {
+            const day = $(this).data("day");
+            const noLimit = $(this).find(".no-limit-input").is(':checked');
+            const minuteInput = $(this).find(".day-minute-input");
+
+            if (noLimit) {
+                dayLimits[day] = false;
+                if(day === todayDayName) activeDayLimits[day] = false;
+            } else {
+                let dayMinutes = Number(minuteInput.val());
+                dayMinutes = Math.max(0, Math.min(1439, Math.round(dayMinutes * 2) / 2));
+                minuteInput.val(dayMinutes); // Update input to validated value
+                dayLimits[day] = dayMinutes;
+                 if(day === todayDayName) activeDayLimits[day] = dayMinutes;
+            }
+        });
+    } else {
+        // If not customizing, clear the stored dayLimits object
+        dayLimits = {};
+    }
+
+    // 3. Reset Time
+    const resetTime = $("#time").val();
+    // Basic validation for time format HH:MM
+    if (!/^[0-2][0-9]:[0-5][0-9]$/.test(resetTime)) {
+        statusMessageEl.textContent = 'Error: Invalid Reset Time format. Use HH:MM.';
+        clearStatusMessage();
+        return; // Stop saving
+    }
+
+    // 4. Limit Overrides Checkbox and Value
+    const limitOverrides = $('#limitOverrides').is(':checked');
+    let overrideLimit = Number($("#overrideLimit").val());
+    overrideLimit = Math.max(0, Math.min(1000, overrideLimit)); // Validation
+    $("#overrideLimit").val(overrideLimit); // Update input
+
+    // 5. Pause Out of Focus
+    const pauseOutOfFocus = $('#pauseOutOfFocus').is(':checked');
+
+    // 6. YouTube Kids Enabled
+    const youtubekidsEnabled = $('#youtubekidsEnabled').is(':checked');
+
+    // 7. Whitelist Handles
+    const whitelistHandles = Array.from(whitelistUl.querySelectorAll('li'))
+                                 .map(li => li.firstChild.textContent); // Read handles from the current list
+
+
+    // --- Prepare data for storage ---
+    const settingsToSave = {
+        timeLimit: timeLimit,
+        customizeLimits: customizeLimits,
+        dayLimits: dayLimits,
+        resetTime: resetTime,
+        limitOverrides: limitOverrides,
+        overrideLimit: overrideLimit,
+        // Only update currentOverrideCount if limitOverrides is enabled
+        // And generally reset it when the limit itself is saved
+        currentOverrideCount: limitOverrides ? overrideLimit : undefined, // Reset or leave undefined
+        pauseOutOfFocus: pauseOutOfFocus,
+        youtubekidsEnabled: youtubekidsEnabled,
+        [storageKey]: whitelistHandles // Use dynamic key
+    };
+
+    // Remove undefined currentOverrideCount if not limiting
+    if (settingsToSave.currentOverrideCount === undefined) {
+        delete settingsToSave.currentOverrideCount;
+    }
+
+
+    // --- Save to Chrome Storage ---
+    chrome.storage.local.set(settingsToSave, function() {
+        if (chrome.runtime.lastError) {
+            statusMessageEl.textContent = `Error saving settings: ${chrome.runtime.lastError.message}`;
+            console.error("Error saving settings:", chrome.runtime.lastError);
+        } else {
+            settingsChanged = false; // Reset flag on successful save
+            statusMessageEl.textContent = 'Settings Saved Successfully!';
+
+             // Send messages to background script
+             chrome.runtime.sendMessage({ msg: "pauseOutOfFocus", val: pauseOutOfFocus });
+             chrome.runtime.sendMessage({ msg: "youtubekidsEnabled", val: youtubekidsEnabled });
+             chrome.runtime.sendMessage({ msg: "resetTimeUpdated" }); // Inform background about potential reset time change
+
+
+             // Determine correct message based on customization status
+             if (customizeLimits) {
+                 // Send message about the *current* day's limit if it changed
+                 if (todayDayName in activeDayLimits) {
+                      if (activeDayLimits[todayDayName] === false) {
+                           chrome.runtime.sendMessage({ msg: "noLimitInputChange", day: todayDayName });
+                      } else {
+                           // Send specific day limit update
+                           chrome.runtime.sendMessage({ msg: "dayTimeLimitUpdated", day: todayDayName });
+                      }
+                 } else {
+                      // If today is not in dayLimits, it uses the general one, but since customizeLimits is true,
+                      // we should probably ensure the background knows the general limit isn't the active one.
+                      // A safe bet might be to resend the general limit, but background might handle this already.
+                      // Let's assume background re-evaluates on customizeLimits change.
+                      // Consider sending a generic "limits changed" message if needed.
+                      // For now, let's rely on the background handling customizeLimits state change.
+                 }
+                  // Inform background customization is on (might be redundant if already known)
+                 // chrome.runtime.sendMessage({ msg: "customizeLimitsTrue" }); // Needs corresponding handler in background.js if used
+
+             } else {
+                  // Send message that customization is OFF and the general limit applies
+                 chrome.runtime.sendMessage({ msg: "customizeLimitsFalse" }); // This should trigger background to use timeLimit
+                 chrome.runtime.sendMessage({ msg: "timeLimitUpdated" }); // Also send the general limit update
+             }
+
+
+            // GA Events (Optional: group them or make more specific)
+            ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Save All Settings'});
+        }
+        clearStatusMessage(); // Clear message after a few seconds
     });
 }
 
-// --- Event Listeners ---
+// --- Add Event Listeners ---
+function addChangeListeners() {
+    // Remove existing listeners to prevent duplicates if loadSettings is called again
+    $('.setting-input').off('change input'); // Use a class for all inputs needing change tracking
+    $('#addWhitelistBtn').off('click');
+    $(whitelistUl).off('click', '.remove-whitelist-btn');
+    $('#saveAllSettingsBtn').off('click');
+    $(window).off('beforeunload');
 
-// Add button click
-addWhitelistBtn.addEventListener('click', addChannelToWhitelist);
 
-// Listener for remove buttons (using event delegation)
-whitelistUl.addEventListener('click', function(event) {
-    if (event.target.classList.contains('remove-whitelist-btn')) {
-        // Get handle from data attribute
-        const channelHandle = event.target.dataset.channelHandle;
-        if (confirm(`Are you sure you want to remove channel handle ${channelHandle} from the whitelist?`)) {
-            removeChannelFromWhitelist(channelHandle);
+    // General input changes
+    $('.setting-input').on('change input', setSettingsChanged); // Track changes on various input types
+
+    // Special handling for checkboxes that control visibility/disabling
+    $('#customizeLimits').on('change', handleCustomizeLimitsChange);
+    $('.no-limit-input').on('change', handleNoLimitChange);
+    $('#limitOverrides').on('change', handleLimitOverridesChange);
+
+    // Whitelist buttons
+    addWhitelistBtn.addEventListener('click', addChannelToWhitelist);
+    whitelistUl.addEventListener('click', function(event) {
+        if (event.target.classList.contains('remove-whitelist-btn')) {
+            const channelHandle = event.target.dataset.channelHandle;
+             // No confirm here, just mark for removal. Confirmation happens on page leave if unsaved.
+             removeChannelFromWhitelist(channelHandle);
         }
-    }
-});
+    });
 
-// Initial rendering of the whitelist when the options page loads
-document.addEventListener('DOMContentLoaded', renderWhitelist);
+    // Save All button
+    $('#saveAllSettingsBtn').on('click', saveAllSettings);
+
+    // Warn before leaving page if changes are unsaved
+    $(window).on('beforeunload', function(e) {
+        if (settingsChanged) {
+            const confirmationMessage = 'You have unsaved changes. Are you sure you want to leave?';
+            (e || window.event).returnValue = confirmationMessage; // Standard
+            return confirmationMessage; // For older browsers
+        }
+        // If settingsChanged is false, return undefined (or nothing) to allow navigation
+        return undefined;
+    });
+}
+
+
+// --- Initial Load ---
+document.addEventListener('DOMContentLoaded', loadSettings);
