@@ -35,8 +35,13 @@ chrome.storage.local.get({"customizeLimits":false, "dayLimits":{}}, function(dat
 // Function to load/update the whitelist cache
 function updateWhitelistCache() {
     chrome.storage.local.get({ "whitelistedHandles": [] }, function(data) {
-        whitelistedHandles = data.whitelistedHandles;
-        // console.log("Whitelist cache updated:", whitelistedHandles);
+        if (chrome.runtime.lastError) {
+            console.error("Error getting whitelist from storage:", chrome.runtime.lastError.message);
+            whitelistedHandles = []; // Reset to empty on error
+        } else {
+            whitelistedHandles = data.whitelistedHandles || []; // Ensure it's an array
+            // console.log("Whitelist cache updated:", whitelistedHandles);
+        }
     });
 }
 
@@ -947,29 +952,52 @@ async function checkTabForYouTube(url) {
 
 // Function remains largely the same, now used by background script only
 async function isChannelWhitelisted(tabUrl) {
+    // console.log("Checking whitelist for:", tabUrl); // Debugging
+    if (!tabUrl || !whitelistedHandles || whitelistedHandles.length === 0) {
+        return false; // No URL or no whitelist entries
+    }
+
+    // 1. Check direct URL for /@handle (works for channel pages)
     const handleFromUrl = getHandleFromUrl(tabUrl);
     if (handleFromUrl && whitelistedHandles.includes(handleFromUrl)) {
+        // console.log(`Handle ${handleFromUrl} from URL is whitelisted.`);
         return true;
     }
 
-    // No need to message content script from background for handle,
-    // content script checks itself or background uses URL handle.
-    // If we absolutely needed background to ask content script:
-    /*
-    if (isYoutubeVideo(tabUrl) && currentTab && currentTab.id) {
+    // 2. If it's a video page, ask the content script for the handle
+    // Ensure currentTab is valid and matches the URL being checked
+    if (isYoutubeVideo(tabUrl) && currentTab && currentTab.id && currentTab.url === tabUrl) {
         try {
+            // console.log("Asking content script for handle for tab:", currentTab.id); // Debugging
+            // Send message to get the handle from the page content
             const response = await chrome.tabs.sendMessage(currentTab.id, { msg: "getChannelHandleFromPage" });
-            if (response && response.channelHandle && whitelistedHandles.includes(response.channelHandle)) {
-                return true;
+
+            if (response && response.channelHandle) {
+                // console.log("Received handle from content script:", response.channelHandle); // Debugging
+                if (whitelistedHandles.includes(response.channelHandle)) {
+                    // console.log(`Handle ${response.channelHandle} from video page content script is whitelisted.`);
+                    return true;
+                } else {
+                     // console.log(`Handle ${response.channelHandle} from video page not in whitelist.`); // Debugging
+                }
+            } else {
+                // console.log("Content script did not return a handle."); // Debugging
             }
         } catch (e) {
-             if (!e.message.includes("Could not establish connection") && !e.message.includes("Receiving end does not exist")) {
-                console.warn("Background error messaging content script for handle:", e);
+             // Ignore common errors when content script isn't ready or doesn't respond
+             if (!e.message.includes("Could not establish connection") && !e.message.includes("Receiving end does not exist") && !e.message.includes("message port closed before a response")) {
+                console.warn("Error messaging content script for channel handle:", e);
+             } else {
+                 // console.log("Content script not available or ready for handle check."); // Debugging
              }
+             // Proceed without handle from content script if messaging fails
         }
+    } else {
+        // console.log("Not a video page or currentTab mismatch, skipping content script check."); // Debugging
     }
-    */
 
+    // 3. If no match found yet
+    // console.log("URL/Handle not found in whitelist:", tabUrl);
     return false;
 }
 
