@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube Time",
   "description": "Prevent procrastination by setting a daily time limit for your YouTube usage.",
-  "version": "1.4.5",
+  "version": "1.5.0",
   "icons": {
     "128": "images/icon - 128.png"
   },
@@ -15,7 +15,9 @@
         "*://*.youtube.com/*",
         "*://*.youtubekids.com/*"
       ],
-      "js": ["saveVideo.js"]
+      "css": ["css/overlay.css"],
+      "js": ["js/jquery-3.3.1.min.js", "saveVideo.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {
@@ -26,7 +28,8 @@
   "permissions": [
     "storage",
     "tabs",
-    "alarms"
+    "alarms",
+    "scripting"
   ],
   "host_permissions": [
      "*://*.youtube.com/*",

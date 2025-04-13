@@ -1,5 +1,7 @@
 ga('send', 'pageview', '/options.html');
 
+const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+
 let settingsChanged = false; // Flag to track unsaved changes
 const statusMessageEl = document.getElementById('statusMessage'); // For showing save status
 
@@ -315,38 +317,51 @@ function saveAllSettings() {
             settingsChanged = false; // Reset flag on successful save
             statusMessageEl.textContent = 'Settings Saved Successfully!';
 
-             // Send messages to background script
-             chrome.runtime.sendMessage({ msg: "pauseOutOfFocus", val: pauseOutOfFocus });
-             chrome.runtime.sendMessage({ msg: "youtubekidsEnabled", val: youtubekidsEnabled });
-             chrome.runtime.sendMessage({ msg: "resetTimeUpdated" }); // Inform background about potential reset time change
+            // --- Calculate and send the immediate timeLeft update ---
+            let newTimeLeftForBackground;
+            const savedDayLimits = settingsToSave.dayLimits; // Use the object we just saved
+            const savedCustomizeLimits = settingsToSave.customizeLimits;
+            const savedTimeLimit = settingsToSave.timeLimit;
 
-
-             // Determine correct message based on customization status
-             if (customizeLimits) {
-                 // Send message about the *current* day's limit if it changed
-                 if (todayDayName in activeDayLimits) {
-                      if (activeDayLimits[todayDayName] === false) {
-                           chrome.runtime.sendMessage({ msg: "noLimitInputChange", day: todayDayName });
-                      } else {
-                           // Send specific day limit update
-                           chrome.runtime.sendMessage({ msg: "dayTimeLimitUpdated", day: todayDayName });
-                      }
+            if (savedCustomizeLimits) {
+                 const todayDayName = days[new Date().getDay()]; // Need 'days' array defined globally or pass it
+                 if (todayDayName in savedDayLimits) {
+                     if (savedDayLimits[todayDayName] === false) {
+                         newTimeLeftForBackground = 0; // No limit means timer effectively off, but let background handle noLimit state
+                         // Send the specific no-limit message if needed
+                         chrome.runtime.sendMessage({ msg: "noLimitInputChange", day: todayDayName });
+                     } else {
+                         newTimeLeftForBackground = savedDayLimits[todayDayName] * 60;
+                         // Send specific day limit update
+                         chrome.runtime.sendMessage({ msg: "dayTimeLimitUpdated", day: todayDayName });
+                     }
                  } else {
-                      // If today is not in dayLimits, it uses the general one, but since customizeLimits is true,
-                      // we should probably ensure the background knows the general limit isn't the active one.
-                      // A safe bet might be to resend the general limit, but background might handle this already.
-                      // Let's assume background re-evaluates on customizeLimits change.
-                      // Consider sending a generic "limits changed" message if needed.
-                      // For now, let's rely on the background handling customizeLimits state change.
+                     // If customizing but today isn't specified, use the general limit
+                     newTimeLeftForBackground = savedTimeLimit * 60;
+                      // Inform background customization is on (might be redundant)
+                     // chrome.runtime.sendMessage({ msg: "customizeLimitsTrue" });
                  }
-                  // Inform background customization is on (might be redundant if already known)
-                 // chrome.runtime.sendMessage({ msg: "customizeLimitsTrue" }); // Needs corresponding handler in background.js if used
+            } else {
+                // Not customizing, use the general limit
+                newTimeLeftForBackground = savedTimeLimit * 60;
+                // Send message that customization is OFF and the general limit applies
+                chrome.runtime.sendMessage({ msg: "customizeLimitsFalse" });
+                // timeLimitUpdated message might be redundant if using direct timeLeft update
+                // chrome.runtime.sendMessage({ msg: "timeLimitUpdated" });
+            }
 
-             } else {
-                  // Send message that customization is OFF and the general limit applies
-                 chrome.runtime.sendMessage({ msg: "customizeLimitsFalse" }); // This should trigger background to use timeLimit
-                 chrome.runtime.sendMessage({ msg: "timeLimitUpdated" }); // Also send the general limit update
-             }
+            // Send the direct timeLeft update message
+            chrome.runtime.sendMessage({
+                msg: "updateTimeLeftNow",
+                newTime: newTimeLeftForBackground
+            });
+            // --- End immediate timeLeft update ---
+
+
+            // Send other messages (keep these)
+            chrome.runtime.sendMessage({ msg: "pauseOutOfFocus", val: pauseOutOfFocus });
+            chrome.runtime.sendMessage({ msg: "youtubekidsEnabled", val: youtubekidsEnabled });
+            chrome.runtime.sendMessage({ msg: "resetTimeUpdated" });
 
 
             // GA Events (Optional: group them or make more specific)
@@ -354,7 +369,7 @@ function saveAllSettings() {
         }
         clearStatusMessage(); // Clear message after a few seconds
     });
-}
+} // End of saveAllSettings function
 
 // --- Add Event Listeners ---
 function addChangeListeners() {

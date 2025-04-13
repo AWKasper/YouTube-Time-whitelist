@@ -1,0 +1,70 @@
+#youtube-time-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.85); /* Dark semi-transparent background */
+    z-index: 999999; /* Ensure it's on top */
+    display: flex;
+    flex-direction: column; /* Stack elements vertically */
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-family: sans-serif;
+    text-align: center;
+    visibility: hidden; /* Hidden by default */
+    opacity: 0; /* Start fully transparent */
+    transition: visibility 0s linear 0.3s, opacity 0.3s linear; /* Fade transition */
+}
+
+#youtube-time-overlay.visible {
+    visibility: visible;
+    opacity: 1;
+    transition: visibility 0s linear 0s, opacity 0.3s linear;
+}
+
+#youtube-time-overlay-content {
+    background-color: rgba(50, 50, 50, 0.9); /* Slightly lighter box for content */
+    padding: 40px;
+    border-radius: 10px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+}
+
+
+#youtube-time-overlay h1 {
+    font-size: 3em; /* Adjust size as needed */
+    margin-bottom: 20px;
+}
+
+#youtube-time-override-btn {
+    padding: 15px 30px;
+    font-size: 1.2em;
+    cursor: pointer;
+    background-color: #6c757d; /* Bootstrap secondary grey */
+    color: white;
+    border: none;
+    border-radius: 5px;
+    margin-top: 10px; /* Space between button and text below */
+}
+
+#youtube-time-override-btn:hover {
+    background-color: #5a6268; /* Darker grey on hover */
+}
+
+#youtube-time-override-btn:disabled {
+    background-color: #aaa;
+    cursor: not-allowed;
+}
+
+
+#youtube-time-overrides-left {
+    margin-top: 15px;
+    font-size: 1em;
+    color: #ccc;
+}
+
+/* Hide scrollbar when overlay is active */
+body.youtube-time-overlay-active {
+    overflow: hidden !important;
+}
