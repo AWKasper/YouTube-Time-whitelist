@@ -1,73 +1,57 @@
-// --- Overlay Elements (Global within this script) ---
 let overlay = null;
 let overrideButton = null;
 let overridesLeftText = null;
 
-// --- Function to Create Overlay ---
 function createOverlay() {
     if (document.getElementById('youtube-time-overlay')) {
-        return; // Already exists
+        return;
     }
-
     overlay = document.createElement('div');
     overlay.id = 'youtube-time-overlay';
-    // Classes are handled dynamically for visibility transition
-
     const contentDiv = document.createElement('div');
     contentDiv.id = 'youtube-time-overlay-content';
-
     const title = document.createElement('h1');
     title.textContent = 'Time is up';
-
     const overrideCommands = document.createElement('div');
-    overrideCommands.style.marginTop = '20px'; // Add some spacing
-
+    overrideCommands.style.marginTop = '20px';
     overrideButton = document.createElement('button');
     overrideButton.id = 'youtube-time-override-btn';
     overrideButton.textContent = 'Override';
     overrideButton.addEventListener('click', handleOverrideClick);
-
     overridesLeftText = document.createElement('div');
     overridesLeftText.id = 'youtube-time-overrides-left';
-    overridesLeftText.textContent = ''; // Will be populated later
-
+    overridesLeftText.textContent = '';
     overrideCommands.appendChild(overrideButton);
     overrideCommands.appendChild(overridesLeftText);
-
     contentDiv.appendChild(title);
     contentDiv.appendChild(overrideCommands);
     overlay.appendChild(contentDiv);
-
     document.body.appendChild(overlay);
-    console.log("YouTube Time overlay created.");
+    // console.log("YouTube Time: Overlay created.");
 }
 
-// --- Function to Show Overlay ---
 function showOverlay() {
     if (!overlay) {
         createOverlay();
     }
-    if (!overlay) return; // Creation failed
+    if (!overlay) return;
 
-    // Pause video
-    const videoElement = document.querySelector('video.html5-main-video'); // Common selector
+    const videoElement = document.querySelector('video.html5-main-video');
     if (videoElement && !videoElement.paused) {
         videoElement.pause();
-        console.log("YouTube Time: Video paused.");
+        // console.log("YouTube Time: Video paused.");
     } else if (!videoElement) {
-         console.log("YouTube Time: Could not find video element to pause.");
+         // console.log("YouTube Time: Could not find video element to pause.");
     }
 
-    // Update override button status
     chrome.storage.local.get({"overrideLimit":5, "currentOverrideCount":null, "limitOverrides":true}, function(data) {
         const currentCount = data.currentOverrideCount !== null ? data.currentOverrideCount : data.overrideLimit;
         const limitEnabled = data.limitOverrides;
-
         if(overrideButton && overridesLeftText) {
             if (limitEnabled) {
                  if (currentCount < 1) {
                     overrideButton.disabled = true;
-                    overrideButton.style.display = 'none'; // Hide if no overrides left
+                    overrideButton.style.display = 'none';
                     overridesLeftText.textContent = "No overrides remaining today.";
                  } else {
                     overrideButton.disabled = false;
@@ -75,7 +59,6 @@ function showOverlay() {
                     overridesLeftText.textContent = `${currentCount} Override${currentCount === 1 ? '' : 's'} Left`;
                  }
             } else {
-                // Overrides not limited
                 overrideButton.disabled = false;
                 overrideButton.style.display = 'inline-block';
                 overridesLeftText.textContent = "Overrides are not limited.";
@@ -83,49 +66,39 @@ function showOverlay() {
         }
     });
 
-    // Make overlay visible and add body class
     overlay.classList.add('visible');
     document.body.classList.add('youtube-time-overlay-active');
-    console.log("YouTube Time overlay shown.");
+    // console.log("YouTube Time: Overlay shown.");
 }
 
-// --- Function to Hide Overlay ---
 function hideOverlay() {
     if (overlay) {
         overlay.classList.remove('visible');
         document.body.classList.remove('youtube-time-overlay-active');
-        console.log("YouTube Time overlay hidden.");
-        // Note: We don't automatically resume the video here. User has to do it.
+        // console.log("YouTube Time: Overlay hidden.");
     }
 }
 
-// --- Override Button Click Handler ---
 function handleOverrideClick() {
     const answer = confirm("Are you sure you need to use YouTube?");
     if (answer) {
-        // Send message to background to handle override logic (decrement count, set state)
         chrome.runtime.sendMessage({ msg: "override", value: true }, (response) => {
              if (chrome.runtime.lastError) {
                  console.error("Error sending override message:", chrome.runtime.lastError.message);
-                 // Optional: Show an error to the user on the overlay?
              } else {
-                // Optimistically hide overlay immediately for better UX
                  hideOverlay();
-                 ga('send', {hitType: 'event', eventCategory: 'Overlay', eventAction: 'Override'});
              }
         });
     }
 }
 
-
-// --- Message Listener from Background Script ---
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-    // console.log("Content script received message:", request.msg); // Debugging
+    // console.log("Content script received message:", request.msg); // Uncomment for debugging
 
     if (request.msg === "showOverlay") {
         showOverlay();
         sendResponse({status: "Overlay shown"});
-        return true; // Indicate async response potentially needed later if we added more logic
+        return true;
     }
 
     if (request.msg === "hideOverlay") {
@@ -134,40 +107,75 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
          return true;
     }
 
-    // --- Keep Existing Listeners ---
     if (request.msg === "getChannelHandleFromPage") {
         let channelHandle = null;
         let handleElement = null;
+        let foundUsing = "none";
 
-        // Try selectors (add more as needed)
-        handleElement = document.querySelector("span[itemprop='author'] link[itemprop='url'][href*='/@']");
-        if (!handleElement) {
-            handleElement = document.querySelector("ytd-channel-name #text-container a.yt-simple-endpoint[href^='/@'], a.yt-simple-endpoint.ytd-video-owner-renderer[href^='/@']");
+        // Try different selectors to find the channel link
+        handleElement = document.querySelector("ytd-video-owner-renderer ytd-channel-name a.yt-simple-endpoint[href^='/@']");
+        if (handleElement) {
+           foundUsing = "ytd-video-owner-renderer ytd-channel-name a";
         }
-        // Add more robust selectors if the above fail often
-         if (!handleElement) {
-             // Look for the canonical URL link which often has the handle
+
+        if (!handleElement) {
+           handleElement = document.querySelector("ytd-channel-name a.yt-simple-endpoint[href^='/@']");
+           if (handleElement) {
+             foundUsing = "ytd-channel-name a";
+           }
+        }
+
+        if (!handleElement) {
+            handleElement = document.querySelector("span[itemprop='author'] link[itemprop='url'][href*='/@']");
+             if (handleElement) {
+               foundUsing = "itemprop";
+             }
+        }
+
+        if (!handleElement) {
+             // Check canonical link, often contains the handle URL for video pages
              handleElement = document.querySelector("link[rel='canonical'][href*='/@']");
+             if (handleElement) {
+                foundUsing = "canonical";
+             }
          }
 
-
         if (handleElement && handleElement.href) {
+             // console.log("Found handle element using:", foundUsing, handleElement); // Uncomment for debugging
              try {
-                 const urlPath = new URL(handleElement.href).pathname;
-                 const handleMatch = urlPath.match(/\/(@[\w.-]+)/);
+                 const urlObj = new URL(handleElement.href, document.baseURI);
+                 const urlPath = urlObj.pathname;
+
+                 let decodedPath = urlPath;
+                 try {
+                    decodedPath = decodeURIComponent(urlPath);
+                    // console.log("Original path:", urlPath); // Debugging
+                    // console.log("Explicitly decoded path:", decodedPath); // Debugging
+                 } catch(decodeError) {
+                    console.warn("Error decoding path:", urlPath, decodeError);
+                 }
+
+                 // --- Use the decodedPath for matching ---
+                 // *** UPDATED REGEX *** Matches '@' followed by one or more non-slash, non-whitespace characters
+                 const handleMatch = decodedPath.match(/\/(@[^\/\s]+)/);
                  if (handleMatch && handleMatch[1]) {
                      channelHandle = handleMatch[1];
+                     // console.log("Regex matched:", handleMatch[1]); // Debugging
+                 } else {
+                    // console.log("Regex did not match decoded path:", decodedPath); // Debugging
                  }
+                 // --- End use decodedPath ---
+
              } catch(e) {
-                 console.error("Error parsing handle link:", e);
+                 console.error("Error parsing handle link:", handleElement.href, e);
              }
         } else {
-            // console.log("Could not find handle element using known selectors.");
+            // console.log("Could not find handle element using known selectors."); // Debugging
         }
 
-        // console.log("Content script sending handle:", channelHandle);
-        sendResponse({ channelHandle: channelHandle });
-        return true;
+        // console.log("Content script sending handle:", channelHandle); // Debugging
+        sendResponse({ channelHandle: channelHandle }); // Send the DECODED handle (or null)
+        return true; // Indicate async response
     }
 
     if (request.msg == "saveVideoURL") {
@@ -180,6 +188,8 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         }
         return true; // Indicate async response
 	}
+
+    return false;
 });
 
 function urlNoTime(url) {
@@ -187,17 +197,17 @@ function urlNoTime(url) {
 	return url.split("&t=")[0];
 }
 
-// --- Initial Check on Load ---
-// Check if the overlay should be shown immediately when the page loads
-// This covers cases where the timer ran out before navigating to this page.
-chrome.storage.local.get(["timeLeft", "override"], function(data) {
+chrome.storage.local.get(["timeLeft", "override", "tempOverrideTabs"], function(data) {
+    if (chrome.runtime.lastError) {
+      console.warn("Error getting initial storage:", chrome.runtime.lastError.message);
+      return;
+    }
     if (data.timeLeft <= 0 && !data.override) {
-        // Check if current page is YouTube and not whitelisted before showing overlay
         chrome.runtime.sendMessage({ msg: "checkPageStatus", url: window.location.href }, response => {
             if (chrome.runtime.lastError) {
-                 console.warn("Error checking page status on load:", chrome.runtime.lastError.message);
-                 // Assume we should show overlay if error occurs? Or default to not showing?
-                 // Let's default to not showing overlay on error during load check.
+                 if (!chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
+                     console.warn("Error checking page status on load:", chrome.runtime.lastError.message);
+                 }
             } else if (response && response.shouldOverlay) {
                  showOverlay();
             }

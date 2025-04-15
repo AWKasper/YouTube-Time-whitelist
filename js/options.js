@@ -30,8 +30,13 @@ function loadSettings() {
         "overrideLimit": 5,
         "pauseOutOfFocus": true,
         "youtubekidsEnabled": true,
-        [storageKey]: [] // Include whitelist handles
+        "whitelistedHandles": [] // Use the actual key directly
     }, function(data) {
+        if (chrome.runtime.lastError) {
+             console.error("Error loading settings:", chrome.runtime.lastError);
+             statusMessageEl.textContent = 'Error loading settings.';
+             return;
+        }
         // General Time Limit
         $("#minutes").val(data.timeLimit);
 
@@ -39,11 +44,11 @@ function loadSettings() {
         $('#customizeLimits').prop('checked', data.customizeLimits);
         if (data.customizeLimits) {
             $("#customLimitsDiv").show();
-            $("#minutes, #saveMinutes").prop("disabled", true); // Keep general limit disabled visually
+            $("#minutes").prop("disabled", true); // Keep general limit disabled visually
             populateDayLimits(data.dayLimits, data.timeLimit); // Pass defaults
         } else {
             $("#customLimitsDiv").hide();
-            $("#minutes, #saveMinutes").prop("disabled", false);
+            $("#minutes").prop("disabled", false);
         }
 
         // Reset Time
@@ -65,7 +70,7 @@ function loadSettings() {
         $('#youtubekidsEnabled').prop('checked', data.youtubekidsEnabled);
 
         // Render Whitelist (using existing function)
-        renderWhitelist(data[storageKey]); // Pass the loaded handles
+        renderWhitelist(data.whitelistedHandles); // Pass the loaded handles
 
         // Add change listeners AFTER loading initial values
         addChangeListeners();
@@ -82,77 +87,105 @@ function populateDayLimits(dayLimits, defaultTimeLimit) {
         var day = $(this).data("day");
         var minuteInput = $(this).find(".day-minute-input");
         var noLimitInput = $(this).find(".no-limit-input");
-        // var saveButton = $(this).find(".save-day-limit"); // No longer needed
 
         if (day in dayLimits) {
             if (dayLimits[day] === false) { // No limit set for this day
-                // saveButton.prop("disabled", true); // No longer needed
                 minuteInput.prop("disabled", true).val(''); // Clear and disable
                 noLimitInput.prop('checked', true);
             } else { // Specific limit set for this day
                 minuteInput.val(dayLimits[day]).prop("disabled", false);
-                // saveButton.prop("disabled", false); // No longer needed
                 noLimitInput.prop('checked', false);
             }
         } else { // No specific setting, use default
             minuteInput.val(defaultTimeLimit).prop("disabled", false);
-            // saveButton.prop("disabled", false); // No longer needed
             noLimitInput.prop('checked', false);
         }
     });
     // No need for $("#customLimitsDiv").show(); here, done in loadSettings
 }
 
-// --- Whitelist Variables & Functions (Keep existing logic, modify add/remove) ---
-const storageKey = "whitelistedHandles";
+// --- Whitelist Variables & Functions ---
+const storageKey = "whitelistedHandles"; // Keep variable for consistency if needed elsewhere
 const whitelistInput = document.getElementById('whitelistChannelHandle');
 const addWhitelistBtn = document.getElementById('addWhitelistBtn');
 const whitelistUl = document.getElementById('whitelistHandles');
 
-// Function to render the whitelist from storage (Modified to accept data)
+// Function to render the whitelist from storage (Accepts data)
 function renderWhitelist(handles) {
     whitelistUl.innerHTML = ''; // Clear current list
+    if (!Array.isArray(handles)) {
+         console.error("Whitelist data is not an array:", handles);
+         handles = []; // Default to empty array if data is invalid
+    }
     handles.forEach(channelHandle => {
         const li = document.createElement('li');
         li.className = 'list-group-item d-flex justify-content-between align-items-center';
+        // Display the handle as is (it should be decoded already)
         li.textContent = channelHandle;
 
         const removeBtn = document.createElement('button');
         removeBtn.className = 'btn btn-danger btn-sm remove-whitelist-btn';
         removeBtn.textContent = 'Remove';
-        removeBtn.dataset.channelHandle = channelHandle;
+        removeBtn.dataset.channelHandle = channelHandle; // Store handle for removal
 
         li.appendChild(removeBtn);
         whitelistUl.appendChild(li);
     });
 }
 
-// Function to add a channel to the whitelist (Modified to set flag)
+// Function to add a channel to the whitelist (Sets flag, DECODES input)
 function addChannelToWhitelist() {
     let channelHandle = whitelistInput.value.trim();
 
     if (channelHandle.length > 1 && channelHandle.startsWith('@')) {
+         // Optional: Remove leading slash if user includes it (e.g. /@handle)
         if (channelHandle.startsWith('/@')) {
-             channelHandle = channelHandle.substring(1);
+             channelHandle = channelHandle.substring(1); // Get '@handle'
          }
-        chrome.storage.local.get({ [storageKey]: [] }, function(data) {
-            const currentWhitelist = data[storageKey];
-            if (!currentWhitelist.includes(channelHandle)) {
-                // Don't save here, just update UI and mark as changed
-                currentWhitelist.push(channelHandle); // Add to local copy for rendering
-                whitelistInput.value = '';
-                renderWhitelist(currentWhitelist); // Re-render based on local copy
-                setSettingsChanged(); // Mark settings as changed
-                statusMessageEl.textContent = 'Handle added to list (not saved yet).';
-                clearStatusMessage();
-                 // ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Add Handle Pending', eventLabel: channelHandle});
-            } else {
-                statusMessageEl.textContent = 'Channel handle is already in the list.';
-                 clearStatusMessage();
-            }
-        });
+
+        // --- Decode the input handle ---
+        let decodedHandle = channelHandle;
+        try {
+             // Decode percent-encoded characters if present in the input
+             decodedHandle = decodeURIComponent(channelHandle);
+             // console.log("Input handle decoded to:", decodedHandle); // Debugging
+        } catch(e) {
+             console.warn("Could not decode handle input, using original:", channelHandle, e);
+             // Keep original handle if decoding fails (e.g., invalid sequences)
+             decodedHandle = channelHandle;
+        }
+        // --- End Decode ---
+
+        // Get current list directly from UI to check for duplicates before modifying UI
+        const currentHandlesInUI = Array.from(whitelistUl.querySelectorAll('li'))
+                                       .map(li => li.firstChild.textContent);
+
+        if (!currentHandlesInUI.includes(decodedHandle)) {
+            // Add to UI immediately (don't save to storage yet)
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.textContent = decodedHandle; // Add decoded handle to UI
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn btn-danger btn-sm remove-whitelist-btn';
+            removeBtn.textContent = 'Remove';
+            removeBtn.dataset.channelHandle = decodedHandle;
+
+            li.appendChild(removeBtn);
+            whitelistUl.appendChild(li);
+
+            whitelistInput.value = ''; // Clear input field
+            setSettingsChanged(); // Mark settings as changed
+            statusMessageEl.textContent = 'Handle added to list (Save to apply).';
+            clearStatusMessage();
+            // ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Add Handle Pending', eventLabel: decodedHandle});
+        } else {
+            statusMessageEl.textContent = 'Channel handle is already in the list.';
+            clearStatusMessage();
+        }
+
     } else {
-        statusMessageEl.textContent = 'Invalid YouTube Channel Handle format. It should start with "@" (e.g., @google).';
+        statusMessageEl.textContent = 'Invalid YouTube Channel Handle format. It must start with "@" (e.g., @google).';
         clearStatusMessage();
     }
 }
@@ -167,7 +200,7 @@ function removeChannelFromWhitelist(handleToRemove) {
 
      renderWhitelist(updatedWhitelist); // Re-render based on filtered list
      setSettingsChanged(); // Mark settings as changed
-     statusMessageEl.textContent = 'Handle removed from list (not saved yet).';
+     statusMessageEl.textContent = 'Handle removed from list (Save to apply).';
      clearStatusMessage();
      // ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Whitelist Remove Handle Pending', eventLabel: handleToRemove});
 }
@@ -180,7 +213,11 @@ function handleCustomizeLimitsChange() {
         $("#minutes").prop("disabled", true); // Visually disable general limit
         // Get current general limit to populate defaults
         chrome.storage.local.get({"timeLimit": 30, "dayLimits": {}}, function(data){
-             populateDayLimits(data.dayLimits, data.timeLimit); // Populate with current defaults
+            if (!chrome.runtime.lastError) {
+                 populateDayLimits(data.dayLimits, data.timeLimit); // Populate with current defaults
+            } else {
+                console.error("Error getting limits for populating day limits:", chrome.runtime.lastError);
+            }
         });
     } else {
         $("#customLimitsDiv").hide();
@@ -188,7 +225,8 @@ function handleCustomizeLimitsChange() {
         // Optionally clear day-specific inputs visually when disabling
         $(".day-minute-input").val("");
         $(".no-limit-input").prop('checked', false);
-		$(".save-day-limit, .day-minute-input").prop("disabled", false);
+		//$(".save-day-limit, .day-minute-input").prop("disabled", false); // Buttons removed
+        $(".day-minute-input").prop("disabled", false);
     }
     setSettingsChanged();
 }
@@ -196,16 +234,13 @@ function handleCustomizeLimitsChange() {
 function handleNoLimitChange() {
     var dayRow = $(this).closest(".day-row");
 	var minuteInput = dayRow.find(".day-minute-input");
-	// var saveButton = dayRow.find(".save-day-limit"); // No longer needed
 
 	if (this.checked) {
 		minuteInput.prop("disabled", true).val(''); // Disable and clear input
-		// saveButton.prop("disabled", true); // No longer needed
 	} else {
         // Re-enable and set default value (read from general input for immediate feedback)
         let defaultMinutes = $("#minutes").val() || 30;
 		minuteInput.prop("disabled", false).val(defaultMinutes);
-		// saveButton.prop("disabled", false); // No longer needed
 	}
     setSettingsChanged();
 }
@@ -226,7 +261,7 @@ function saveAllSettings() {
 
     // 1. General Time Limit (always read, used if customizeLimits is false)
     let timeLimit = Number($("#minutes").val());
-    timeLimit = Math.max(0, Math.min(1439, Math.round(timeLimit * 2) / 2)); // Validation
+    timeLimit = Math.max(0, Math.min(1439, Math.round(timeLimit))); // Allow 0-1439 minutes (23h 59m)
     $("#minutes").val(timeLimit); // Update input to validated value
 
     // 2. Customize Limits Checkbox and Individual Day Limits
@@ -234,7 +269,6 @@ function saveAllSettings() {
     let dayLimits = {};
     let activeDayLimits = {}; // Store limits actually being used today/for messaging
     const today = new Date();
-	const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const todayDayName = days[today.getDay()];
 
 
@@ -245,13 +279,13 @@ function saveAllSettings() {
             const minuteInput = $(this).find(".day-minute-input");
 
             if (noLimit) {
-                dayLimits[day] = false;
+                dayLimits[day] = false; // Store 'false' for no limit
                 if(day === todayDayName) activeDayLimits[day] = false;
             } else {
                 let dayMinutes = Number(minuteInput.val());
-                dayMinutes = Math.max(0, Math.min(1439, Math.round(dayMinutes * 2) / 2));
+                dayMinutes = Math.max(0, Math.min(1439, Math.round(dayMinutes))); // Validate
                 minuteInput.val(dayMinutes); // Update input to validated value
-                dayLimits[day] = dayMinutes;
+                dayLimits[day] = dayMinutes; // Store the number
                  if(day === todayDayName) activeDayLimits[day] = dayMinutes;
             }
         });
@@ -272,7 +306,7 @@ function saveAllSettings() {
     // 4. Limit Overrides Checkbox and Value
     const limitOverrides = $('#limitOverrides').is(':checked');
     let overrideLimit = Number($("#overrideLimit").val());
-    overrideLimit = Math.max(0, Math.min(1000, overrideLimit)); // Validation
+    overrideLimit = Math.max(0, Math.min(1000, Math.round(overrideLimit))); // Validation
     $("#overrideLimit").val(overrideLimit); // Update input
 
     // 5. Pause Out of Focus
@@ -282,8 +316,9 @@ function saveAllSettings() {
     const youtubekidsEnabled = $('#youtubekidsEnabled').is(':checked');
 
     // 7. Whitelist Handles
+    // Read handles directly from the current UI list elements
     const whitelistHandles = Array.from(whitelistUl.querySelectorAll('li'))
-                                 .map(li => li.firstChild.textContent); // Read handles from the current list
+                                 .map(li => li.firstChild.textContent); // Should be decoded already
 
 
     // --- Prepare data for storage ---
@@ -294,17 +329,18 @@ function saveAllSettings() {
         resetTime: resetTime,
         limitOverrides: limitOverrides,
         overrideLimit: overrideLimit,
-        // Only update currentOverrideCount if limitOverrides is enabled
-        // And generally reset it when the limit itself is saved
-        currentOverrideCount: limitOverrides ? overrideLimit : undefined, // Reset or leave undefined
+        // Reset currentOverrideCount when the limit is saved, if limiting is enabled
+        currentOverrideCount: limitOverrides ? overrideLimit : undefined,
         pauseOutOfFocus: pauseOutOfFocus,
         youtubekidsEnabled: youtubekidsEnabled,
-        [storageKey]: whitelistHandles // Use dynamic key
+        whitelistedHandles: whitelistHandles // Save the handles (should be decoded)
     };
 
-    // Remove undefined currentOverrideCount if not limiting
+    // Remove undefined currentOverrideCount if not limiting overrides
     if (settingsToSave.currentOverrideCount === undefined) {
         delete settingsToSave.currentOverrideCount;
+        // Also explicitly remove from storage if limiting was just turned off
+        chrome.storage.local.remove("currentOverrideCount");
     }
 
 
@@ -317,54 +353,53 @@ function saveAllSettings() {
             settingsChanged = false; // Reset flag on successful save
             statusMessageEl.textContent = 'Settings Saved Successfully!';
 
-            // --- Calculate and send the immediate timeLeft update ---
+            // --- Calculate and send the immediate timeLeft update to background ---
             let newTimeLeftForBackground;
             const savedDayLimits = settingsToSave.dayLimits; // Use the object we just saved
             const savedCustomizeLimits = settingsToSave.customizeLimits;
             const savedTimeLimit = settingsToSave.timeLimit;
+            const todayDayName = days[new Date().getDay()]; // Get today's name again
 
             if (savedCustomizeLimits) {
-                 const todayDayName = days[new Date().getDay()]; // Need 'days' array defined globally or pass it
                  if (todayDayName in savedDayLimits) {
                      if (savedDayLimits[todayDayName] === false) {
-                         newTimeLeftForBackground = 0; // No limit means timer effectively off, but let background handle noLimit state
-                         // Send the specific no-limit message if needed
+                         // No limit today
+                         newTimeLeftForBackground = -1; // Signal no limit (background will handle noLimit flag)
                          chrome.runtime.sendMessage({ msg: "noLimitInputChange", day: todayDayName });
                      } else {
+                         // Specific limit today
                          newTimeLeftForBackground = savedDayLimits[todayDayName] * 60;
-                         // Send specific day limit update
                          chrome.runtime.sendMessage({ msg: "dayTimeLimitUpdated", day: todayDayName });
                      }
                  } else {
-                     // If customizing but today isn't specified, use the general limit
+                     // Customizing, but today uses the general limit
                      newTimeLeftForBackground = savedTimeLimit * 60;
-                      // Inform background customization is on (might be redundant)
-                     // chrome.runtime.sendMessage({ msg: "customizeLimitsTrue" });
+                      // Inform background customization is on but general limit applies today
+                      // (Might need a specific message if background needs this distinction)
                  }
             } else {
                 // Not customizing, use the general limit
                 newTimeLeftForBackground = savedTimeLimit * 60;
-                // Send message that customization is OFF and the general limit applies
                 chrome.runtime.sendMessage({ msg: "customizeLimitsFalse" });
-                // timeLimitUpdated message might be redundant if using direct timeLeft update
-                // chrome.runtime.sendMessage({ msg: "timeLimitUpdated" });
             }
 
-            // Send the direct timeLeft update message
-            chrome.runtime.sendMessage({
-                msg: "updateTimeLeftNow",
-                newTime: newTimeLeftForBackground
-            });
+            // Send the direct timeLeft update message (handle noLimit case in background)
+            if (newTimeLeftForBackground !== -1) { // Don't send time if it's a noLimit day
+                 chrome.runtime.sendMessage({
+                     msg: "updateTimeLeftNow",
+                     newTime: newTimeLeftForBackground
+                 });
+            }
             // --- End immediate timeLeft update ---
 
 
-            // Send other messages (keep these)
+            // Send other setting updates to background
             chrome.runtime.sendMessage({ msg: "pauseOutOfFocus", val: pauseOutOfFocus });
             chrome.runtime.sendMessage({ msg: "youtubekidsEnabled", val: youtubekidsEnabled });
-            chrome.runtime.sendMessage({ msg: "resetTimeUpdated" });
+            chrome.runtime.sendMessage({ msg: "resetTimeUpdated" }); // Inform background reset time might have changed
 
 
-            // GA Events (Optional: group them or make more specific)
+            // GA Events (Optional)
             ga('send', {hitType: 'event', eventCategory: 'Settings', eventAction: 'Save All Settings'});
         }
         clearStatusMessage(); // Clear message after a few seconds
@@ -381,8 +416,8 @@ function addChangeListeners() {
     $(window).off('beforeunload');
 
 
-    // General input changes
-    $('.setting-input').on('change input', setSettingsChanged); // Track changes on various input types
+    // General input changes trigger the changed flag
+    $('.setting-input').on('change input', setSettingsChanged);
 
     // Special handling for checkboxes that control visibility/disabling
     $('#customizeLimits').on('change', handleCustomizeLimitsChange);
@@ -394,7 +429,7 @@ function addChangeListeners() {
     whitelistUl.addEventListener('click', function(event) {
         if (event.target.classList.contains('remove-whitelist-btn')) {
             const channelHandle = event.target.dataset.channelHandle;
-             // No confirm here, just mark for removal. Confirmation happens on page leave if unsaved.
+             // Removes from UI and sets changed flag
              removeChannelFromWhitelist(channelHandle);
         }
     });
@@ -405,7 +440,7 @@ function addChangeListeners() {
     // Warn before leaving page if changes are unsaved
     $(window).on('beforeunload', function(e) {
         if (settingsChanged) {
-            const confirmationMessage = 'You have unsaved changes. Are you sure you want to leave?';
+            const confirmationMessage = 'You have unsaved changes. Are you sure you want to leave without saving?';
             (e || window.event).returnValue = confirmationMessage; // Standard
             return confirmationMessage; // For older browsers
         }
