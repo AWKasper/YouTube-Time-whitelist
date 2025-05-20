@@ -25,24 +25,16 @@ function createOverlay() {
     overrideCommands.appendChild(overridesLeftText);
     contentDiv.appendChild(title);
     contentDiv.appendChild(overrideCommands);
-    overlay.appendChild(contentDiv);
     document.body.appendChild(overlay);
-    // console.log("YouTube Time: Overlay created.");
+    // console.log("CS: YouTube Time: Overlay created.");
 }
 
 function showOverlay() {
-    if (!overlay) {
-        createOverlay();
-    }
+    if (!overlay) createOverlay();
     if (!overlay) return;
 
     const videoElement = document.querySelector('video.html5-main-video');
-    if (videoElement && !videoElement.paused) {
-        videoElement.pause();
-        // console.log("YouTube Time: Video paused.");
-    } else if (!videoElement) {
-         // console.log("YouTube Time: Could not find video element to pause.");
-    }
+    if (videoElement && !videoElement.paused) videoElement.pause();
 
     chrome.storage.local.get({"overrideLimit":5, "currentOverrideCount":null, "limitOverrides":true}, function(data) {
         const currentCount = data.currentOverrideCount !== null ? data.currentOverrideCount : data.overrideLimit;
@@ -68,32 +60,48 @@ function showOverlay() {
 
     overlay.classList.add('visible');
     document.body.classList.add('youtube-time-overlay-active');
-    // console.log("YouTube Time: Overlay shown.");
+    // console.log("CS: YouTube Time: Overlay shown.");
 }
 
 function hideOverlay() {
     if (overlay) {
         overlay.classList.remove('visible');
         document.body.classList.remove('youtube-time-overlay-active');
-        // console.log("YouTube Time: Overlay hidden.");
+        // console.log("CS: YouTube Time: Overlay hidden.");
     }
 }
 
 function handleOverrideClick() {
-    const answer = confirm("Are you sure you need to use YouTube?");
-    if (answer) {
+    if (confirm("Are you sure you need to use YouTube?")) {
         chrome.runtime.sendMessage({ msg: "override", value: true }, (response) => {
-             if (chrome.runtime.lastError) {
-                 console.error("Error sending override message:", chrome.runtime.lastError.message);
-             } else {
-                 hideOverlay();
-             }
+             if (chrome.runtime.lastError) console.error("CS: Error sending override message:", chrome.runtime.lastError.message);
+             else hideOverlay();
         });
     }
 }
 
+
+function extractIdentifierFromUrlPath(path) {
+    if (!path) return null;
+
+    // Check for @handle pattern first: /@something
+    let handleMatch = path.match(/^\/(@[a-zA-Z0-9._-]{3,30})/);
+    if (handleMatch && handleMatch[1]) {
+        return handleMatch[1];
+    }
+
+    // Then check for /channel/UC... pattern
+    let channelIdMatch = path.match(/^\/channel\/(UC[a-zA-Z0-9_-]{22})/);
+    if (channelIdMatch && channelIdMatch[1]) {
+        return channelIdMatch[1];
+    }
+    
+    return null;
+}
+
+
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-    // console.log("Content script received message:", request.msg); // Uncomment for debugging
+    // console.log("CS: Received message:", request.msg);
 
     if (request.msg === "showOverlay") {
         showOverlay();
@@ -104,92 +112,193 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.msg === "hideOverlay") {
         hideOverlay();
         sendResponse({status: "Overlay hidden"});
-         return true;
+        return true;
     }
 
     if (request.msg === "getChannelHandleFromPage") {
-        let channelHandle = null;
-        let handleElement = null;
-        let foundUsing = "none";
+        let outHandle = null;
+        let outUcId = null;
+        // console.log("CS: --- Attempting to get channel identifiers (handle & UCID) ---");
 
-        // Try different selectors to find the channel link
-        handleElement = document.querySelector("ytd-video-owner-renderer ytd-channel-name a.yt-simple-endpoint[href^='/@']");
-        if (handleElement) {
-           foundUsing = "ytd-video-owner-renderer ytd-channel-name a";
+        // STAGE 1: Prioritize @handle if the current window URL path clearly indicates it.
+        // This is for when the user is directly on a page like youtube.com/@handle
+        // Also try to get UCID if path is like /channel/UCID
+        let idFromCurrentPath = extractIdentifierFromUrlPath(window.location.pathname);
+        if (idFromCurrentPath) {
+            if (idFromCurrentPath.startsWith('@')) {
+                outHandle = idFromCurrentPath;
+                // if (outHandle) console.log("CS: Stage 1 - Found @handle from window.location.pathname:", outHandle);
+            } else if (idFromCurrentPath.startsWith('UC')) {
+                outUcId = idFromCurrentPath;
+                // if (outUcId) console.log("CS: Stage 1 - Found UCID from window.location.pathname:", outUcId);
+            }
         }
 
-        if (!handleElement) {
-           handleElement = document.querySelector("ytd-channel-name a.yt-simple-endpoint[href^='/@']");
-           if (handleElement) {
-             foundUsing = "ytd-channel-name a";
-           }
+        // STAGE 2: Check canonical URL. This can provide either @handle or UCID.
+        const canonicalLinkElement = document.querySelector('link[rel="canonical"]');
+        if (canonicalLinkElement && canonicalLinkElement.href) {
+            try {
+                const canonicalUrl = new URL(canonicalLinkElement.href);
+                let idFromCanonical = extractIdentifierFromUrlPath(canonicalUrl.pathname);
+                if (idFromCanonical) {
+                    if (idFromCanonical.startsWith('@') && !outHandle) {
+                        outHandle = idFromCanonical;
+                        // if (outHandle) console.log("CS: Stage 2 - Found @handle from canonical URL:", outHandle);
+                    } else if (idFromCanonical.startsWith('UC') && !outUcId) {
+                        outUcId = idFromCanonical;
+                        // if (outUcId) console.log("CS: Stage 2 - Found UCID from canonical URL:", outUcId);
+                    }
+                }
+            } catch (e) { /* console.warn("CS: Could not parse canonical URL", e); */ }
+        }
+        
+        // STAGE 3: Reliable methods for UC... ID (especially on video pages).
+        // Method 3a: ytInitialPlayerResponse (good for UC... ID on video pages)
+        if (!outUcId) { // Only if not already found
+            try {
+                const scripts = Array.from(document.querySelectorAll('script'));
+                for (const script of scripts) {
+                    const scriptContent = script.textContent;
+                    if (scriptContent && scriptContent.includes('ytInitialPlayerResponse')) {
+                        const channelIdMatch = scriptContent.match(/"channelId":"(UC[a-zA-Z0-9_-]{22})"/);
+                        if (channelIdMatch && channelIdMatch[1]) {
+                            outUcId = channelIdMatch[1];
+                            // if (outUcId) console.log("CS: Stage 3a - Found UC ID from ytInitialPlayerResponse:", outUcId);
+                            break; 
+                        }
+                    }
+                }
+            } catch (e) { /* console.warn("CS: Error parsing ytInitialPlayerResponse", e); */ }
         }
 
-        if (!handleElement) {
-            handleElement = document.querySelector("span[itemprop='author'] link[itemprop='url'][href*='/@']");
-             if (handleElement) {
-               foundUsing = "itemprop";
-             }
+        if (!outUcId) { // Only if not already found
+            // Method 3b: Meta tag for Channel ID (good for UC... ID on video pages)
+            const metaChannelIdTag = document.querySelector('meta[itemprop="channelId"]');
+            if (metaChannelIdTag && metaChannelIdTag.content && metaChannelIdTag.content.startsWith("UC")) {
+                outUcId = metaChannelIdTag.content;
+                // if (outUcId) console.log("CS: Stage 3b - Found UC ID from meta[itemprop='channelId']:", outUcId);
+            }
         }
 
-        if (!handleElement) {
-             // Check canonical link, often contains the handle URL for video pages
-             handleElement = document.querySelector("link[rel='canonical'][href*='/@']");
-             if (handleElement) {
-                foundUsing = "canonical";
-             }
-         }
+        // STAGE 4: Broader fallbacks - These methods might find either @handles or UC... IDs
+        // from various links or embedded data if nothing definitive was found yet for one or both.
+        
+        // Method 4a: JSON-LD (Structured Data)
+        if (!outHandle || !outUcId) { // If still missing one or both
+            const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+            for (const script of jsonLdScripts) {
+                if (outHandle && outUcId) break; // Stop if both found
+                try {
+                    const jsonData = JSON.parse(script.textContent);
+                    let sourceUrlStr = null;
+                    if (jsonData.author && jsonData.author.url) sourceUrlStr = jsonData.author.url;
+                    else if (jsonData.creator && jsonData.creator.url) sourceUrlStr = jsonData.creator.url;
+                    else if (jsonData.creator && Array.isArray(jsonData.creator) && jsonData.creator[0] && jsonData.creator[0].url) sourceUrlStr = jsonData.creator[0].url;
+                    else if (jsonData.channel && jsonData.channel.url) sourceUrlStr = jsonData.channel.url;
+                    else if (jsonData.author && typeof jsonData.author === 'string' && jsonData.author.startsWith('http')) sourceUrlStr = jsonData.author;
 
-        if (handleElement && handleElement.href) {
-             // console.log("Found handle element using:", foundUsing, handleElement); // Uncomment for debugging
-             try {
-                 const urlObj = new URL(handleElement.href, document.baseURI);
-                 const urlPath = urlObj.pathname;
-
-                 let decodedPath = urlPath;
-                 try {
-                    decodedPath = decodeURIComponent(urlPath);
-                    // console.log("Original path:", urlPath); // Debugging
-                    // console.log("Explicitly decoded path:", decodedPath); // Debugging
-                 } catch(decodeError) {
-                    console.warn("Error decoding path:", urlPath, decodeError);
-                 }
-
-                 // --- Use the decodedPath for matching ---
-                 // *** UPDATED REGEX *** Matches '@' followed by one or more non-slash, non-whitespace characters
-                 const handleMatch = decodedPath.match(/\/(@[^\/\s]+)/);
-                 if (handleMatch && handleMatch[1]) {
-                     channelHandle = handleMatch[1];
-                     // console.log("Regex matched:", handleMatch[1]); // Debugging
-                 } else {
-                    // console.log("Regex did not match decoded path:", decodedPath); // Debugging
-                 }
-                 // --- End use decodedPath ---
-
-             } catch(e) {
-                 console.error("Error parsing handle link:", handleElement.href, e);
-             }
-        } else {
-            // console.log("Could not find handle element using known selectors."); // Debugging
+                    if (sourceUrlStr) {
+                        try {
+                            const parsedSourceUrl = new URL(sourceUrlStr);
+                            let idFromJson = extractIdentifierFromUrlPath(parsedSourceUrl.pathname);
+                            if (idFromJson) {
+                                if (idFromJson.startsWith('@') && !outHandle) {
+                                    outHandle = idFromJson;
+                                    // if (outHandle) console.log("CS: Stage 4a - Found @handle from JSON-LD:", sourceUrlStr, "->", outHandle);
+                                } else if (idFromJson.startsWith('UC') && !outUcId) {
+                                    outUcId = idFromJson;
+                                    // if (outUcId) console.log("CS: Stage 4a - Found UCID from JSON-LD:", sourceUrlStr, "->", outUcId);
+                                }
+                            }
+                        } catch (urlParseError) { /* console.warn("CS: Could not parse URL from JSON-LD:", sourceUrlStr, urlParseError); */ }
+                    }
+                } catch (e) { /* console.warn("CS: Error parsing JSON-LD:", e); */ }
+            }
         }
 
-        // console.log("Content script sending handle:", channelHandle); // Debugging
-        sendResponse({ channelHandle: channelHandle }); // Send the DECODED handle (or null)
+        // Method 4b: Common link selectors for video owner/channel name
+        if (!outHandle || !outUcId) { // If still missing one or both
+            const linkSelectors = [
+                'ytd-video-owner-renderer[watch-metadata] #channel-name .yt-simple-endpoint',
+                'ytd-video-owner-renderer a.yt-simple-endpoint',
+                'ytd-channel-name a.yt-simple-endpoint',
+                '#meta-contents #channel-name .yt-simple-endpoint',
+                'a.ytp-ce-channel-title.ytp-ce-link'
+            ];
+            for (const selector of linkSelectors) {
+                if (outHandle && outUcId) break; // Stop if both found
+                const linkElement = document.querySelector(selector);
+                if (linkElement && linkElement.href) {
+                     try {
+                        const parsedLinkUrl = new URL(linkElement.href, window.location.origin);
+                        let idFromLink = extractIdentifierFromUrlPath(parsedLinkUrl.pathname);
+                        if (idFromLink) {
+                            if (idFromLink.startsWith('@') && !outHandle) {
+                                outHandle = idFromLink;
+                                // if (outHandle) console.log(`CS: Stage 4b - Found @handle from link ('${selector}'):`, outHandle);
+                            } else if (idFromLink.startsWith('UC') && !outUcId) {
+                                outUcId = idFromLink;
+                                // if (outUcId) console.log(`CS: Stage 4b - Found UCID from link ('${selector}'):`, outUcId);
+                            }
+                        }
+                    } catch (urlParseError) { /* console.warn("CS: Could not parse link href for selector " + selector, urlParseError); */ }
+                }
+            }
+        }
+        
+        // Method 4c: ytd-browse element (usually for UC... ID on actual channel pages)
+        if (!outUcId) { // Only if UCID is still missing
+            const browseElement = document.querySelector('ytd-browse[browse-id^="UC"]');
+            if (browseElement) {
+                const browseId = browseElement.getAttribute('browse-id');
+                if (browseId && /^UC[a-zA-Z0-9_-]{22}$/.test(browseId)) {
+                    outUcId = browseId;
+                    // if (outUcId) console.log("CS: Stage 4c - Found UC ID from ytd-browse[browse-id]:", outUcId);
+                }
+            }
+        }
+
+        // STAGE 5: Final fallback to current window.location.pathname (if still one is missing)
+        // This is a last-ditch effort.
+        if (!outHandle && idFromCurrentPath && idFromCurrentPath.startsWith('@')) {
+            outHandle = idFromCurrentPath;
+            // if (outHandle) console.log("CS: Stage 5 - Found @handle from window.location.pathname (last resort):", outHandle);
+        }
+        if (!outUcId && idFromCurrentPath && idFromCurrentPath.startsWith('UC')) {
+            outUcId = idFromCurrentPath;
+            // if (outUcId) console.log("CS: Stage 5 - Found UCID from window.location.pathname (last resort):", outUcId);
+        }
+        
+        // Final decoding for @handles if it was percent-encoded in a URL
+        if (outHandle && outHandle.includes('%')) {
+            try {
+                outHandle = decodeURIComponent(outHandle);
+                // console.log("CS: Decoded handle:", outHandle);
+            } catch (e) {
+                // console.warn("CS: Error decoding extracted handle:", outHandle, e);
+            }
+        }
+
+        // console.log("CS: --- Final identifiers to send: Handle:", outHandle, " UCID:", outUcId, "---");
+        sendResponse({ channelHandle: outHandle, channelUcId: outUcId });
         return true; // Indicate async response
     }
 
     if (request.msg == "saveVideoURL") {
-		let video = document.getElementsByClassName('video-stream')[0];
+        let video = document.getElementsByClassName('video-stream')[0];
+        let currentUrl = window.location.href; // Get current URL for reliable base
+        let baseUrl = currentUrl.split("&t=")[0]; 
+        
         if (video) {
-		    let totalSeconds = Math.floor(video.currentTime);
-		    sendResponse(urlNoTime(location.href) + "&t=" + totalSeconds);
+            let totalSeconds = Math.floor(video.currentTime);
+            sendResponse(baseUrl + "&t=" + totalSeconds);
         } else {
-            sendResponse(urlNoTime(location.href));
+            sendResponse(baseUrl);
         }
-        return true; // Indicate async response
-	}
+        return true;
+    }
 
-    return false;
+    return false; // Default for other messages
 });
 
 function urlNoTime(url) {
@@ -197,16 +306,17 @@ function urlNoTime(url) {
 	return url.split("&t=")[0];
 }
 
+// Initial check for overlay if time might be up
 chrome.storage.local.get(["timeLeft", "override", "tempOverrideTabs"], function(data) {
     if (chrome.runtime.lastError) {
-      console.warn("Error getting initial storage:", chrome.runtime.lastError.message);
+      console.warn("CS: Error getting initial storage:", chrome.runtime.lastError.message);
       return;
     }
     if (data.timeLeft <= 0 && !data.override) {
         chrome.runtime.sendMessage({ msg: "checkPageStatus", url: window.location.href }, response => {
             if (chrome.runtime.lastError) {
                  if (!chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
-                     console.warn("Error checking page status on load:", chrome.runtime.lastError.message);
+                     console.warn("CS: Error checking page status on load:", chrome.runtime.lastError.message);
                  }
             } else if (response && response.shouldOverlay) {
                  showOverlay();
