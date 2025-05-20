@@ -85,12 +85,15 @@ function extractIdentifierFromUrlPath(path) {
     if (!path) return null;
 
     // Check for @handle pattern first: /@something
-    let handleMatch = path.match(/^\/(@[a-zA-Z0-9._-]{3,30})/);
+    // Modified regex to capture percent-encoded characters in handles.
+    // It matches '@' followed by at least 3 characters that are not '/', '?', '#', or whitespace.
+    // The captured string (e.g., "@%E3%83%88...") will be decoded later.
+    let handleMatch = path.match(/^\/(@[^/?#\s]{3,})/); 
     if (handleMatch && handleMatch[1]) {
         return handleMatch[1];
     }
 
-    // Then check for /channel/UC... pattern
+    // Then check for /channel/UC... pattern (this regex remains unchanged)
     let channelIdMatch = path.match(/^\/channel\/(UC[a-zA-Z0-9_-]{22})/);
     if (channelIdMatch && channelIdMatch[1]) {
         return channelIdMatch[1];
