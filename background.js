@@ -1,10 +1,3 @@
-chrome.runtime.onInstalled.addListener(function (object) {
-	if (object.reason === chrome.runtime.OnInstalledReason.INSTALL) {
-		chrome.tabs.create({url: "/pages/options.html"});
-	}
-});
-
-var override = false;
 var onYoutubeVideoPage = false; // True if timer is active on a YT video page
 var timeLeft = 1800; // Default time in seconds
 var currentTab = null;
@@ -15,13 +8,20 @@ var checkBrowserFocusTimer = null;
 var timer = null; // Holds the setInterval ID
 var noLimit = false; // True if no time limit for the current day
 var whitelistedHandles = []; // Stores whitelisted @handles and UC... IDs
-var tempOverrideTabs = []; // Stores tab IDs temporarily overridden
+// tempOverrideTabs will store objects like { tabId: 123, videoId: "dQw4w9WgXcQ" }
+var tempOverrideTabs = []; 
 var resetCheckAlarmName = "youtubeTimeResetCheck";
 
 checkReset();
 setupResetCheckAlarm();
 
 var days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+
+chrome.runtime.onInstalled.addListener(function (object) {
+	if (object.reason === chrome.runtime.OnInstalledReason.INSTALL) {
+		chrome.tabs.create({url: "/pages/options.html"});
+	}
+});
 
 chrome.storage.local.get({"customizeLimits":false, "dayLimits":{}}, function(data) {
 	if (data.customizeLimits) {
@@ -41,8 +41,7 @@ function updateWhitelistCache() {
         } else {
             whitelistedHandles = data.whitelistedHandles || [];
         }
-        // console.log("BG: Whitelist cache updated:", whitelistedHandles);
-        if (currentTab && currentTab.url) { // Re-check if a tab is active
+        if (currentTab && currentTab.url) { 
             checkTabStatus(currentTab.url);
         }
     });
@@ -52,24 +51,19 @@ updateWhitelistCache();
 chrome.storage.onChanged.addListener(function(changes, namespace) {
 	if (namespace === 'local') {
         if (changes.whitelistedHandles) {
-            updateWhitelistCache(); // This will re-check current tab status
+            updateWhitelistCache(); 
         }
         if (changes.timeLeft) {
             timeLeft = changes.timeLeft.newValue;
-            // No immediate badge update here, let checkTabStatus or regular updates handle it
         }
-        if (changes.override) {
-            override = changes.override.newValue;
-            if (currentTab && currentTab.url && isYoutube(currentTab.url)) checkTabStatus(currentTab.url);
-        }
-        if (changes.tempOverrideTabs) {
+        if (changes.tempOverrideTabs) { // This now reflects changes to the array of {tabId, videoId} objects
             tempOverrideTabs = changes.tempOverrideTabs.newValue || [];
             if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
         }
         if (changes.noLimit) {
              noLimit = changes.noLimit.newValue;
-             if (noLimit && timer !=null) stopTime(); // stopTime calls updateBadge
-             else updateBadge(); // If timer wasn't running but noLimit changes, update badge
+             if (noLimit && timer !=null) stopTime(); 
+             else updateBadge(); 
              if(noLimit) hideOverlayOnAllWindows();
              if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
         }
@@ -86,10 +80,9 @@ chrome.storage.onChanged.addListener(function(changes, namespace) {
 });
 
 chrome.storage.local.get({
-    "override":override, "pauseOutOfFocus":pauseOutOfFocus, "youtubekidsEnabled":youtubekidsEnabled,
+    "pauseOutOfFocus":pauseOutOfFocus, "youtubekidsEnabled":youtubekidsEnabled,
     "timeLeft":timeLeft, "tempOverrideTabs": []
 }, function(data) {
-	override = data.override;
 	pauseOutOfFocus = data.pauseOutOfFocus;
 	youtubekidsEnabled = data.youtubekidsEnabled;
     tempOverrideTabs = data.tempOverrideTabs || [];
@@ -112,7 +105,7 @@ chrome.tabs.onActivated.addListener(function(activeInfo) {
 		    currentTab = tab;
 		    checkTabStatus(tab.url);
         } else {
-            currentTab = null; onYoutubeVideoPage = false; stopTime(); // updateBadge is called in stopTime
+            currentTab = null; onYoutubeVideoPage = false; stopTime(); 
         }
 	});
 });
@@ -121,23 +114,53 @@ chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
 	checkReset();
 	if(tab.active && (changeInfo.url || changeInfo.status === 'complete')){
 		currentTab = tab;
-		checkTabStatus(tab.url);
+		checkTabStatus(tab.url); // This will now re-evaluate based on the new URL/video ID
 	}
 });
 
 chrome.tabs.onRemoved.addListener(function(tabId, removeInfo) {
-    var index = tempOverrideTabs.indexOf(tabId);
-    if (index !== -1) {
-        tempOverrideTabs.splice(index, 1);
+    // Remove all overrides associated with the closed tab
+    const initialLength = tempOverrideTabs.length;
+    tempOverrideTabs = tempOverrideTabs.filter(override => override.tabId !== tabId);
+    if (tempOverrideTabs.length !== initialLength) {
         chrome.storage.local.set({ tempOverrideTabs: tempOverrideTabs });
     }
+
     if (currentTab && currentTab.id === tabId) {
         currentTab = null;
-        if (!pauseOutOfFocus) checkWindowsForTimerStop(); // Will call updateBadge if timer stops
+        if (!pauseOutOfFocus) checkWindowsForTimerStop(); 
         else if (onYoutubeVideoPage) { onYoutubeVideoPage = false; stopTime(); }
         else { updateBadge(); }
     }
 });
+
+// Helper function to extract video ID from YouTube URL
+function getVideoId(url) {
+    if (!url) return null;
+    try {
+        const urlObj = new URL(url);
+        if (urlObj.hostname === "www.youtube.com" || urlObj.hostname === "youtube.com" || urlObj.hostname === "m.youtube.com" || urlObj.hostname === "www.youtubekids.com" || urlObj.hostname === "youtubekids.com") {
+            if (urlObj.pathname === "/watch") {
+                return urlObj.searchParams.get("v");
+            }
+            // For shorts, e.g., /shorts/VIDEO_ID
+            const shortsMatch = urlObj.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]{11})/);
+            if (shortsMatch) {
+                return shortsMatch[1];
+            }
+        }
+    } catch (e) {
+        console.warn("BG: Error parsing URL for video ID:", url, e);
+    }
+    return null;
+}
+
+// Helper function to check if the current video in a specific tab is overridden
+function isCurrentVideoOverridden(tabId, videoId) {
+    if (!tabId || !videoId) return false;
+    return tempOverrideTabs.some(override => override.tabId === tabId && override.videoId === videoId);
+}
+
 
 function getIdentifierFromUrlPath(path) {
     if (!path) return null;
@@ -145,9 +168,8 @@ function getIdentifierFromUrlPath(path) {
     if (match) return match[1];
     match = path.match(/^\/channel\/(UC[a-zA-Z0-9_-]{22})/);
     if (match) return match[1];
-    // Generic ID match - used as a fallback for URLs that might just have the ID
     match = path.match(/^\/([a-zA-Z0-9_-]{24})$/);
-    if (match && match[1].startsWith('UC')) return match[1]; // Ensure it looks like a channel ID
+    if (match && match[1].startsWith('UC')) return match[1]; 
     return null;
 }
 
@@ -219,15 +241,15 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
                 timeLeft = Math.max(0, request.newTime);
                 if (timeLeft > 0) {
                      if (currentTab && currentTab.id) hideOverlayOnTab(currentTab.id);
-                     checkWindowsForTimerStart();
-                } else {
-                     if (timer != null) stopTime();
+                     checkWindowsForTimerStart(); 
+                } else { 
+                     if (timer != null) stopTime(); 
                      if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
                 }
                  updateBadge(); sendResponse({status: "TimeLeft updated directly"});
             } else { sendResponse({status: "Invalid time value received"}); }
-            return true;
-		case "override":
+            return true; 
+		case "override": 
             handleOverrideRequest(sender.tab); sendResponse({status: "Override processing started"});
 			break;
 		case "checkReset":
@@ -239,19 +261,21 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 		case "popupUnfocus":
 			popupOpen = false; if (pauseOutOfFocus) checkBrowserFocus(); sendResponse({status: "Popup noted as closed"});
 			break;
-		case "checkPageStatus":
+		case "checkPageStatus": 
 			if (sender.tab && sender.tab.url && sender.tab.id) {
 					const url = sender.tab.url; const tabId = sender.tab.id;
-                    const isVideoPage = isYoutubeVideo(url);
+                    const videoId = getVideoId(url);
+                    const isVideoPage = isYoutubeVideo(url); // or check if videoId is not null
+
 					isChannelWhitelisted(url, tabId).then(isWhitelisted => {
-						const isOverridden = tempOverrideTabs.includes(tabId);
-						const shouldOverlay = timeLeft <= 0 && isVideoPage && !override && !noLimit && !isWhitelisted && !isOverridden;
+						const isOverridden = isCurrentVideoOverridden(tabId, videoId);
+						const shouldOverlay = timeLeft <= 0 && isVideoPage && !noLimit && !isWhitelisted && !isOverridden;
 						sendResponse({ shouldOverlay: shouldOverlay });
 					}).catch(error => {
 						console.error("BG: Error in checkPageStatus/isChannelWhitelisted:", error);
-						sendResponse({ shouldOverlay: false });
+						sendResponse({ shouldOverlay: false }); 
 					});
-					return true;
+					return true; 
 			} else { sendResponse({ shouldOverlay: false }); }
 			break;
         case "pauseOutOfFocus":
@@ -263,26 +287,33 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             youtubekidsEnabled = request.val;
             if (currentTab && currentTab.url) checkTabStatus(currentTab.url); else checkWindowsForTimerStart();
             sendResponse({status: "YouTube Kids setting updated"}); break;
-        case "resetTimeUpdated": sendResponse({status: "Reset time change noted"}); break;
-        case "noLimitInputChange":
+        case "resetTimeUpdated": sendResponse({status: "Reset time change noted"}); break; 
+        case "noLimitInputChange": 
             var todayDate = new Date(); var dayName = days[todayDate.getDay()];
-            if (request.day == dayName) {
-                 noLimit = true; if (timer != null) stopTime(); updateBadge(); hideOverlayOnAllWindows();
-                 if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
+            if (request.day == dayName) { 
+                 noLimit = true; 
+                 if (timer != null) stopTime(); 
+                 updateBadge(); 
+                 hideOverlayOnAllWindows(); 
+                 if (currentTab && currentTab.url) checkTabStatus(currentTab.url); 
             } sendResponse({status: "No limit change processed"}); break;
-        case "dayTimeLimitUpdated":
+        case "dayTimeLimitUpdated": 
             var todayDateLimit = new Date(); var dayNameLimit = days[todayDateLimit.getDay()];
-            if (request.day == dayNameLimit) {
-                noLimit = false; checkWindowsForTimerStart(); updateBadge(); hideOverlayOnAllWindows();
-                if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
+            if (request.day == dayNameLimit) { 
+                noLimit = false; 
+                checkWindowsForTimerStart(); 
+                updateBadge(); 
+                if (currentTab && currentTab.url) checkTabStatus(currentTab.url); 
             } sendResponse({status: "Day time limit change noted"}); break;
-        case "customizeLimitsFalse":
-            noLimit = false; checkWindowsForTimerStart(); updateBadge(); hideOverlayOnAllWindows();
+        case "customizeLimitsFalse": 
+            noLimit = false; 
+            checkWindowsForTimerStart(); 
+            updateBadge(); 
             if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
             sendResponse({status: "Customize limits disabled processed"}); break;
         default: sendResponse({status: "Unknown message type"}); break;
 	}
-    return false;
+    return false; 
 });
 
 function hideOverlayOnTab(tabId) {
@@ -296,29 +327,68 @@ function hideOverlayOnTab(tabId) {
 }
 
 function handleOverrideRequest(senderTab) {
-     if (!senderTab || !senderTab.id) { console.warn("BG: Override request missing senderTab info."); return; }
+     if (!senderTab || !senderTab.id || !senderTab.url) { 
+         console.warn("BG: Override request missing senderTab info or URL."); 
+         return; 
+     }
      const tabId = senderTab.id;
+     const videoId = getVideoId(senderTab.url);
+
+     if (!videoId) {
+         console.warn("BG: Could not get video ID for override request from URL:", senderTab.url);
+         // Optionally, inform the user or just don't proceed with override for non-video pages.
+         return;
+     }
+
      chrome.storage.local.get({"overrideLimit":5, "currentOverrideCount": null, "limitOverrides": true}, function(data) {
+        if (chrome.runtime.lastError) { console.error("BG: Error getting override settings:", chrome.runtime.lastError.message); return; }
+        
         let currentCount = data.currentOverrideCount !== null ? data.currentOverrideCount : data.overrideLimit;
-        const limitEnabled = data.limitOverrides; let canProceedWithOverride = false;
-        if (limitEnabled) { if (currentCount >= 1) { currentCount--; canProceedWithOverride = true; }
-        } else { canProceedWithOverride = true; }
+        const limitEnabled = data.limitOverrides;
+        let canProceedWithOverride = false;
+
+        if (limitEnabled) {
+            if (currentCount >= 1) {
+                currentCount--; 
+                canProceedWithOverride = true;
+            }
+        } else { 
+            canProceedWithOverride = true;
+        }
 
         if (canProceedWithOverride) {
-            if (!tempOverrideTabs.includes(tabId)) tempOverrideTabs.push(tabId);
+            // Remove any existing override for this specific video in this tab first, then add.
+            // This handles re-overriding the same video if something went wrong, though unlikely.
+            tempOverrideTabs = tempOverrideTabs.filter(ov => !(ov.tabId === tabId && ov.videoId === videoId));
+            tempOverrideTabs.push({ tabId: tabId, videoId: videoId });
+            
             const storageUpdate = { tempOverrideTabs: tempOverrideTabs };
-            if (limitEnabled) storageUpdate.currentOverrideCount = currentCount;
+            if (limitEnabled) {
+                storageUpdate.currentOverrideCount = currentCount;
+            }
 
             chrome.storage.local.set(storageUpdate, function() {
-                 if (chrome.runtime.lastError) console.error("BG: Error saving override state:", chrome.runtime.lastError.message);
-                 else if (senderTab) {
-                     currentTab = senderTab;
-                     checkTabStatus(senderTab.url);
+                 if (chrome.runtime.lastError) {
+                     console.error("BG: Error saving override state:", chrome.runtime.lastError.message);
+                 } else {
+                     if (senderTab) { 
+                         currentTab = senderTab; 
+                         checkTabStatus(senderTab.url); 
+                     }
                  }
+            });
+        } else {
+            console.log("BG: Override denied, no overrides left or limit not enabled correctly.");
+            // Potentially send a message to content script to update overlay if override fails
+            chrome.tabs.sendMessage(tabId, { msg: "overrideFailed" }, () => {
+                if (chrome.runtime.lastError && !chrome.runtime.lastError.message.includes("Could not establish connection") && !chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
+                    // console.warn("BG: Error sending overrideFailed to tab " + tabId + ": " + chrome.runtime.lastError.message);
+                }
             });
         }
     });
 }
+
 
 function isYoutube(url) {
     if (!url) return false;
@@ -328,8 +398,7 @@ function isYoutube(url) {
 
 function isYoutubeVideo(url) {
     if (!url) return false;
-	if (youtubekidsEnabled) return /https?:\/\/(?!music\.)(.+?\.)?youtube(kids)?\.com\/watch([A-Za-z0-9\-\._~:\/\?#\[\]@!$&'\(\)\*\+,;\=]*)?/.test(url);
-	return /https?:\/\/(?!music\.)(.+?\.)?youtube\.com\/watch([A-Za-z0-9\-\._~:\/\?#\[\]@!$&'\(\)\*\+,;\=]*)?/.test(url);
+    return getVideoId(url) !== null; // A simpler check using our helper
 }
 
 function setWhitelistBadge() { chrome.action.setBadgeText({ "text": "✓" }); chrome.action.setBadgeBackgroundColor({ color: "#28a745" }); }
@@ -340,9 +409,10 @@ function clearBadge() { chrome.action.setBadgeText({ "text": "" }); }
 async function updateBadge() {
     if (!currentTab || !currentTab.url || !currentTab.id) { clearBadge(); return; }
 
+    const currentVideoId = getVideoId(currentTab.url);
     const isCurrentTabWhitelisted = await isChannelWhitelisted(currentTab.url, currentTab.id);
     const isCurrentTabVideo = isYoutubeVideo(currentTab.url);
-    const isCurrentTabOverridden = tempOverrideTabs.includes(currentTab.id) || override;
+    const isCurrentVideoNowOverridden = isCurrentVideoOverridden(currentTab.id, currentVideoId);
 
     if (isYoutube(currentTab.url)) {
         if (isCurrentTabWhitelisted) {
@@ -350,16 +420,14 @@ async function updateBadge() {
         } else if (noLimit) {
             chrome.action.setBadgeText({ "text": "∞" });
             chrome.action.setBadgeBackgroundColor({ color: "#6c757d" });
-        } else if (isCurrentTabOverridden) {
+        } else if (isCurrentVideoNowOverridden && isCurrentTabVideo) { // Override badge only if it's a video and overridden
             setOverrideBadge();
         } else if (timeLeft <= 0) {
-            setTimerBadge(); // Shows 0:00
-        } else { // Time is left, not whitelisted, not noLimit, not overridden
-            // Show active timer if on a video page and timer is running for it
-            // Otherwise, just show remaining time if on any YouTube page.
+            setTimerBadge(); 
+        } else { 
             if (isCurrentTabVideo && onYoutubeVideoPage && timer != null) {
                 setTimerBadge();
-            } else { // On a YouTube page (general) or video page not actively timed, show remaining time
+            } else { 
                 setTimerBadge();
             }
         }
@@ -374,16 +442,14 @@ function updateTime() {
 	} else {
 		timeLeft = 0;
         if (timer != null) {
-            stopTime(); // This will clear timer, set onYoutubeVideoPage=false, and call updateBadge()
+            stopTime(); 
         }
-        // After stopping, re-evaluate the current tab to show overlay if needed.
         if (currentTab && currentTab.url) {
             checkTabStatus(currentTab.url);
         } else {
-            updateBadge(); // If no current tab for some reason, still update badge.
+            updateBadge(); 
         }
-        // Storing timeLeft should happen after it's confirmed to be 0.
-        chrome.storage.local.set({ "timeLeft": timeLeft }, () => { if (chrome.runtime.lastError) { /*...*/ } });
+        chrome.storage.local.set({ "timeLeft": timeLeft }, () => { if (chrome.runtime.lastError) { /* console.error(...) */ } });
 		return; 
 	}
 
@@ -399,52 +465,48 @@ function updateTime() {
     }
 }
 
-async function startTime() { // Argument 'isChannelWhitelistedOnPage' removed
-    // 1. Initial guards
+async function startTime() { 
     if (timer != null || timeLeft <= 0 || noLimit || !currentTab || !currentTab.id || !currentTab.url ) {
         return;
     }
-    if (!isYoutubeVideo(currentTab.url)) {
+    const currentVideoId = getVideoId(currentTab.url);
+    if (!currentVideoId) { // Not a video page
         return;
     }
-    if (tempOverrideTabs.includes(currentTab.id) || override) {
+    if (isCurrentVideoOverridden(currentTab.id, currentVideoId)) {
         updateBadge(); 
         return;
     }
 
-    // 2. Perform a definitive whitelist check *inside* startTime
     let isChannelWhitelistedForThisStartAttempt = false;
     if (isYoutube(currentTab.url)) { 
         try {
             isChannelWhitelistedForThisStartAttempt = await isChannelWhitelisted(currentTab.url, currentTab.id);
         } catch (e) {
             console.error("BG: Error in startTime's isChannelWhitelisted check for " + currentTab.url + ":", e);
-            // If an error occurs, conservatively assume not whitelisted.
         }
     }
 
-    // 3. If whitelisted, ensure timer is stopped and do not proceed to start it.
     if (isChannelWhitelistedForThisStartAttempt) {
-        if (onYoutubeVideoPage || timer != null) { // If timer was perceived as running or active on page
-            stopTime(); // This will also call updateBadge to show whitelist status
+        if (onYoutubeVideoPage || timer != null) { 
+            stopTime(); 
         } else {
-            updateBadge(); // Ensure badge is correct (e.g., whitelist checkmark)
+            updateBadge(); 
         }
-        return; // Explicitly do not start the timer
+        return; 
     }
 
-    // 4. If all checks pass (not whitelisted, time left, on video page, not overridden etc.)
     onYoutubeVideoPage = true;
-    if (timer == null) { // Check to prevent multiple intervals if somehow called in quick succession
+    if (timer == null) { 
         timer = setInterval(updateTime, 1000);
     }
-    updateBadge(); // Update badge when timer actually starts
+    updateBadge(); 
 }
 
 function stopTime() {
     clearInterval(timer);
     timer = null;
-    if (onYoutubeVideoPage) { // If it was true, set it to false
+    if (onYoutubeVideoPage) { 
         onYoutubeVideoPage = false;
     }
     updateBadge();
@@ -458,7 +520,7 @@ function formatTime(totalSeconds) {
 	var result = "";
 	if (hours > 0) {
 		result += hours + ":";
-		if (minutes < 10 && hours > 0) result += "0"; // Ensure leading zero for minutes only if hours are present.
+		if (minutes < 10 && hours > 0) result += "0"; 
 		result += minutes;
 	} else {
 		result += minutes;
@@ -492,9 +554,13 @@ function checkReset() {
                     else limitToday = data.dayLimits[dayName];
                 }
             }
-            noLimit = noLimitToday; timeLeft = noLimit ? 0 : limitToday * 60; // Use 0 for noLimit true, not -1
-            override = false; tempOverrideTabs = [];
-            const resetStore = { "lastResetTimestamp": targetResetTodayTs, "override": false, "timeLeft": timeLeft, "tempOverrideTabs": [] };
+            noLimit = noLimitToday; timeLeft = noLimit ? 0 : limitToday * 60; 
+            tempOverrideTabs = []; // Clear video-specific overrides
+            const resetStore = { 
+                "lastResetTimestamp": targetResetTodayTs, 
+                "timeLeft": timeLeft, 
+                "tempOverrideTabs": [] 
+            };
             if (data.limitOverrides) resetStore.currentOverrideCount = data.overrideLimit;
             else chrome.storage.local.remove("currentOverrideCount");
 
@@ -517,7 +583,7 @@ function checkReset() {
 
 function setupResetCheckAlarm() {
     chrome.alarms.get(resetCheckAlarmName, (alarm) => {
-        if (!alarm) { // Only create if it doesn't exist
+        if (!alarm) { 
             chrome.alarms.create(resetCheckAlarmName, { periodInMinutes: 1 });
         }
     });
@@ -537,99 +603,91 @@ function hideOverlayOnAllWindows() {
 
 async function checkTabStatus(url) {
     if (!currentTab || !currentTab.id || !url) {
-        if (onYoutubeVideoPage) { // If timer was running for a now-invalid tab context
+        if (onYoutubeVideoPage) { 
             stopTime();
         } else {
-            updateBadge(); // Ensure badge is cleared or updated appropriately
+            updateBadge(); 
         }
         return;
     }
 
     const tabId = currentTab.id;
+    const currentVideoId = getVideoId(url);
     const isCurrentlyYoutubePage = isYoutube(url);
-    const isVideoPage = isYoutubeVideo(url);
-    let isChannelWhitelistedOnPage = false; // This will be determined by isChannelWhitelisted
-    const isOverriddenForThisTab = tempOverrideTabs.includes(tabId);
+    const isVideoPage = currentVideoId !== null; // True if we have a video ID
+    let isChannelWhitelistedOnPage = false; 
+    const isVideoNowOverridden = isCurrentVideoOverridden(tabId, currentVideoId);
+
 
     if (isCurrentlyYoutubePage) {
         try {
-            // This check helps determine if an overlay needs to be hidden or if a stopTime is definitively needed
-            // due to whitelisting, even if startTime will do its own check.
             isChannelWhitelistedOnPage = await isChannelWhitelisted(url, tabId);
         } catch (e) {
             console.error("BG: Error getting whitelist status in checkTabStatus for " + url + ":", e);
-            // Potentially default isChannelWhitelistedOnPage to false or handle error
         }
     }
 
     let shouldAttemptTimerLogic = false;
 
     if (isCurrentlyYoutubePage) {
-        if (isChannelWhitelistedOnPage || noLimit || isOverriddenForThisTab || override) {
-            hideOverlayOnTab(tabId); // Ensure overlay is hidden if whitelisted/overridden/noLimit
-            if (onYoutubeVideoPage) { // If timer was running for this tab
-                 stopTime(); // Stop it as it's whitelisted or similar
+        if (isChannelWhitelistedOnPage || noLimit || (isVideoPage && isVideoNowOverridden)) {
+            hideOverlayOnTab(tabId); 
+            if (onYoutubeVideoPage) { 
+                 stopTime(); 
             }
             shouldAttemptTimerLogic = false;
-        } else if (timeLeft <= 0) {
-            if (isVideoPage) {
-                // Send message to show overlay
+        } else if (timeLeft <= 0) { // Not whitelisted, not noLimit, not overridden, and time is up
+            if (isVideoPage) { // Only show overlay on actual video pages
                 chrome.tabs.sendMessage(tabId, { msg: "showOverlay" }, () => {
                     if (chrome.runtime.lastError && !chrome.runtime.lastError.message.includes("Could not establish connection") && !chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
-                        console.warn("BG: Error sending showOverlay to tab " + tabId + ": " + chrome.runtime.lastError.message);
+                        /* console.warn("BG: Error sending showOverlay to tab " + tabId + ": " + chrome.runtime.lastError.message); */
                     }
                 });
-            } else {
-                hideOverlayOnTab(tabId); // Not a video page, ensure no overlay
+            } else { // Not a video page (e.g. homepage, channel page), ensure no overlay
+                hideOverlayOnTab(tabId); 
             }
-            if (onYoutubeVideoPage) { // If timer was somehow running with timeLeft <= 0
+            if (onYoutubeVideoPage) { 
                 stopTime();
             }
             shouldAttemptTimerLogic = false;
-        } else if (isVideoPage) { // Time is left, not whitelisted/overridden/noLimit, and it's a video page
-            hideOverlayOnTab(tabId); // Ensure overlay is hidden as time is left
+        } else if (isVideoPage) { // Time is left, not whitelisted/noLimit/overridden, and it's a video page
+            hideOverlayOnTab(tabId); 
             shouldAttemptTimerLogic = true;
         } else { // On YouTube but not a video page (e.g., homepage, search results)
             hideOverlayOnTab(tabId);
-            if (onYoutubeVideoPage && pauseOutOfFocus) { // If timer was running for a video and we navigated to a non-video YT page (and pauseOutOfFocus is on)
+            if (onYoutubeVideoPage && pauseOutOfFocus) { 
                  stopTime();
             } else if (onYoutubeVideoPage && !pauseOutOfFocus) {
-                // If not pausing on focus, timer might be for another tab.
-                // Stop it for now, checkWindowsForTimerStart will re-evaluate.
                 stopTime();
                 checkWindowsForTimerStart();
             }
+            // If user navigates from an overridden video to a non-video YT page, the override for that videoId remains
+            // but won't apply here. It will be re-checked if they go back to that specific video.
             shouldAttemptTimerLogic = false;
         }
     } else { // Not a YouTube page
-        if (onYoutubeVideoPage) { // If timer was running and user navigated away from YouTube
+        if (onYoutubeVideoPage) { 
             stopTime();
         }
-        // If this tab was temporarily overridden, clear that now since we left YouTube
-        if (isOverriddenForThisTab) {
-             const index = tempOverrideTabs.indexOf(tabId);
-             if (index !== -1) {
-                 tempOverrideTabs.splice(index, 1);
-                 chrome.storage.local.set({ tempOverrideTabs: tempOverrideTabs });
-             }
+        // Clear all overrides for this tab when navigating away from YouTube
+        const initialLength = tempOverrideTabs.length;
+        tempOverrideTabs = tempOverrideTabs.filter(override => override.tabId !== tabId);
+        if (tempOverrideTabs.length !== initialLength) {
+            chrome.storage.local.set({ tempOverrideTabs: tempOverrideTabs });
         }
         shouldAttemptTimerLogic = false;
     }
 
     if (shouldAttemptTimerLogic) {
-        // Only attempt to start if timer isn't already considered active for a page,
-        // or if focus logic allows. startTime() will do the final whitelist check.
         if (!onYoutubeVideoPage || timer == null) {
             if (!pauseOutOfFocus || popupOpen) {
-                 await startTime(); // startTime will do its own robust whitelist check
+                 await startTime(); 
             } else {
-                 // Focus check logic - ensure current tab is active and focused
                  try {
                      const win = await chrome.windows.getLastFocused({ populate: false });
                      if (win && win.focused && currentTab && win.id === currentTab.windowId) {
-                         await startTime(); // startTime will do its own robust whitelist check
+                         await startTime(); 
                      } else {
-                        // If window/tab lost focus and timer was on for *this* page.
                         if(onYoutubeVideoPage && currentTab && currentTab.id === tabId) {
                             stopTime();
                         }
@@ -640,53 +698,35 @@ async function checkTabStatus(url) {
                  }
              }
         }
-        // If timer is already running (onYoutubeVideoPage && timer != null) and shouldAttemptTimerLogic is true,
-        // startTime() will prevent duplicate starts. The main thing is that updateBadge() below will refresh the display.
     }
-    // Always update the badge based on the final state
     updateBadge();
 }
 
 
 async function isChannelWhitelisted(tabUrl, tabId) {
-    // If no URL, or no whitelisted handles are set, or the list is empty, it can't be whitelisted.
     if (!tabUrl || !whitelistedHandles || whitelistedHandles.length === 0) {
         return false;
     }
-
-    // Only proceed if the tabId is valid and the URL is a YouTube URL.
     if (tabId && isYoutube(tabUrl)) {
         try {
-            // Send a message to the content script in the specified tab to get channel identifiers.
-            // Expecting a response like { channelHandle: "@handle", channelUcId: "UC..." }
             const response = await chrome.tabs.sendMessage(tabId, { msg: "getChannelHandleFromPage" });
-
             if (response) {
-                const { channelHandle, channelUcId } = response; // Destructure the response
-
-                // Check if the extracted @handle is in the whitelistedHandles array.
+                const { channelHandle, channelUcId } = response; 
                 if (channelHandle && whitelistedHandles.includes(channelHandle)) {
-                    // console.log("BG: Whitelisted by @handle:", channelHandle);
-                    return true; // Whitelisted by @handle
+                    return true; 
                 }
-                // Check if the extracted UCID is in the whitelistedHandles array.
                 if (channelUcId && whitelistedHandles.includes(channelUcId)) {
-                    // console.log("BG: Whitelisted by UCID:", channelUcId);
-                    return true; // Whitelisted by UCID
+                    return true; 
                 }
             }
         } catch (e) {
-            // Log errors unless they are common benign errors indicating the content script isn't ready or available.
              if (!(e.message.includes("Could not establish connection") || 
                    e.message.includes("Receiving end does not exist") ||
-                   e.message.includes("message port closed before a response"))) { // Added common error check
+                   e.message.includes("message port closed before a response"))) { 
                 console.warn(`BG: Error messaging content script (Tab ${tabId}, URL: ${tabUrl}):`, e.message);
              }
-             // In case of error, assume not whitelisted for safety.
         }
     }
-    
-    // If no conditions for whitelisting were met, or if it's not a YouTube URL, return false.
     return false;
 }
 
@@ -702,14 +742,17 @@ async function checkWindowsForTimerStart() {
             if (pauseOutOfFocus && !win.focused) continue;
 
             for (let tab of win.tabs) {
-                if (tab.active && tab.url && tab.id && isYoutubeVideo(tab.url)) {
-                    if (tempOverrideTabs.includes(tab.id) || override) continue;
-                    
-                    const isWhitelisted = await isChannelWhitelisted(tab.url, tab.id);
-                    if (!isWhitelisted) {
-                        anEligibleVideoPageIsOpenAndFocused = true;
-                        eligibleTabForTimer = tab;
-                        break; 
+                if (tab.active && tab.url && tab.id) {
+                    const videoId = getVideoId(tab.url);
+                    if (videoId) { // It's a video page
+                        if (isCurrentVideoOverridden(tab.id, videoId)) continue; 
+                        
+                        const isWhitelisted = await isChannelWhitelisted(tab.url, tab.id);
+                        if (!isWhitelisted) {
+                            anEligibleVideoPageIsOpenAndFocused = true;
+                            eligibleTabForTimer = tab;
+                            break; 
+                        }
                     }
                 }
             }
@@ -723,7 +766,7 @@ async function checkWindowsForTimerStart() {
               if (!onYoutubeVideoPage || timer == null) {
                   await startTime();
               } else {
-                  updateBadge(); // If timer already running, just ensure badge is correct for current context
+                  updateBadge(); 
               }
          } else {
               if (onYoutubeVideoPage) { stopTime(); }
@@ -740,10 +783,13 @@ async function checkWindowsForTimerStop() {
 
 		for (let win of allWindows) {
             for (let tab of win.tabs) {
-                if (tab.active && tab.url && tab.id && isYoutubeVideo(tab.url)) {
-                    if (tempOverrideTabs.includes(tab.id) || override) continue;
-                    const isWhitelisted = await isChannelWhitelisted(tab.url, tab.id);
-                     if (!isWhitelisted) { anEligibleVideoPageIsOpen = true; break; }
+                 if (tab.active && tab.url && tab.id) {
+                    const videoId = getVideoId(tab.url);
+                    if (videoId) { // It's a video page
+                        if (isCurrentVideoOverridden(tab.id, videoId)) continue; 
+                        const isWhitelisted = await isChannelWhitelisted(tab.url, tab.id);
+                         if (!isWhitelisted) { anEligibleVideoPageIsOpen = true; break; }
+                    }
                 }
             }
             if (anEligibleVideoPageIsOpen) break;
