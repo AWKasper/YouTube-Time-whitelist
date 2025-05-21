@@ -1,5 +1,3 @@
-ga('send', 'pageview', '/options.html');
-
 const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 
 let settingsChanged = false; 
