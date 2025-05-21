@@ -236,20 +236,88 @@ chrome.windows.onFocusChanged.addListener(function(windowId) {
 
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 	switch(request.msg) {
-        case "updateTimeLeftNow":
-            if (typeof request.newTime === 'number' && !isNaN(request.newTime)) {
-                timeLeft = Math.max(0, request.newTime);
-                if (timeLeft > 0) {
-                     if (currentTab && currentTab.id) hideOverlayOnTab(currentTab.id);
-                     checkWindowsForTimerStart(); 
-                } else { 
-                     if (timer != null) stopTime(); 
-                     if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
+        case "getCurrentTimeLeft": // New message from options.js
+            sendResponse({ currentTimeLeft: timeLeft, noLimitActive: noLimit });
+            return true; // Keep channel open for async response (though not strictly needed here)
+        case "settingsRulesChanged": // New message from options.js
+            updateWhitelistCache(); // Whitelist might have changed
+            // Re-evaluate noLimit for today based on storage, as rules might have changed
+            chrome.storage.local.get({"customizeLimits":false, "dayLimits":{}, "timeLimit": 30}, function(data) {
+                if (chrome.runtime.lastError) {
+                    console.error("BG: Error fetching settings for rules changed:", chrome.runtime.lastError.message);
+                    return;
                 }
-                 updateBadge(); sendResponse({status: "TimeLeft updated directly"});
-            } else { sendResponse({status: "Invalid time value received"}); }
-            return true; 
-		case "override": 
+                var today = new Date();
+                var day = days[today.getDay()];
+                let oldNoLimit = noLimit;
+
+                if (data.customizeLimits) {
+                    if (day in data.dayLimits) {
+                        noLimit = (data.dayLimits[day] === false);
+                    } else { // Day not specified under custom, use global as effective limit for today
+                        noLimit = false; // Has a limit (global)
+                    }
+                } else { // Not customizeLimits
+                    noLimit = false; // Has a limit (global)
+                }
+
+                if (noLimit && timer != null) stopTime();
+                // If it became limited and was no-limit, timeLeft adjustment is handled by 'setNoLimitToday'
+                // or by checkReset on a new day.
+                if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
+                else updateBadge(); // If no current tab, just update badge based on new noLimit
+            });
+            sendResponse({status: "Background settings rules re-evaluated"});
+            break;
+        case "setNoLimitToday": // New message from options.js
+            // request contains:
+            // noLimitStateFromOptions: boolean
+            // newTimeForTodayFromOptions: number (seconds, if not noLimitStateFromOptions)
+            // currentActualTimeLeftFromBG: number (seconds, timeLeft in BG before this save)
+            // wasPreviouslyNoLimitInBG: boolean (noLimit in BG before this save)
+
+            noLimit = request.noLimitStateFromOptions;
+
+            if (noLimit) {
+                // timeLeft remains, but won't be used by timer. Badge/overlay logic use `noLimit`.
+                if (timer != null) stopTime();
+                hideOverlayOnAllWindows();
+            } else { // Becoming limited or limit is changing
+                if (request.wasPreviouslyNoLimitInBG) {
+                    // Just switched from "no limit" to a timed limit for today
+                    timeLeft = request.newTimeForTodayFromOptions;
+                } else {
+                    // Was already limited, cap timeLeft if new limit is smaller.
+                    // currentActualTimeLeftFromBG is the time left under the *old* rules.
+                    timeLeft = Math.min(request.currentActualTimeLeftFromBG, request.newTimeForTodayFromOptions);
+                }
+
+                if (timeLeft <= 0) {
+                    timeLeft = 0; // Ensure it's not negative
+                    if (timer != null) stopTime();
+                    // checkTabStatus will be called below and handle overlay if current tab needs it
+                } else {
+                    // Time is positive, and we are now limited.
+                    // If timer was off (e.g., due to noLimit or just started extension) and should be on:
+                     if (timer == null && onYoutubeVideoPage) { // Check if we are on a YT page that should have timer
+                         checkWindowsForTimerStart(); // This will verify all conditions
+                     } else if (timer == null && isYoutubeVideo(currentTab?.url) && !isCurrentVideoOverridden(currentTab?.id, getVideoId(currentTab?.url))) {
+                        // A simpler check if we are on an active, non-overridden video tab
+                        // and noLimit is false and timeLeft > 0
+                        (async () => {
+                            if (currentTab && !(await isChannelWhitelisted(currentTab.url, currentTab.id))) {
+                                startTime();
+                            }
+                        })();
+                     }
+                }
+            }
+            // Re-evaluate current tab with new limit/noLimit status
+            if(currentTab && currentTab.url) checkTabStatus(currentTab.url);
+            else updateBadge(); // If no current tab, just update badge
+            sendResponse({status: "Today's limit/noLimit status updated from options."});
+            break;
+		case "override":
             handleOverrideRequest(sender.tab); sendResponse({status: "Override processing started"});
 			break;
 		case "checkReset":
@@ -261,11 +329,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 		case "popupUnfocus":
 			popupOpen = false; if (pauseOutOfFocus) checkBrowserFocus(); sendResponse({status: "Popup noted as closed"});
 			break;
-		case "checkPageStatus": 
+		case "checkPageStatus":
 			if (sender.tab && sender.tab.url && sender.tab.id) {
 					const url = sender.tab.url; const tabId = sender.tab.id;
                     const videoId = getVideoId(url);
-                    const isVideoPage = isYoutubeVideo(url); // or check if videoId is not null
+                    const isVideoPage = isYoutubeVideo(url);
 
 					isChannelWhitelisted(url, tabId).then(isWhitelisted => {
 						const isOverridden = isCurrentVideoOverridden(tabId, videoId);
@@ -273,44 +341,30 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 						sendResponse({ shouldOverlay: shouldOverlay });
 					}).catch(error => {
 						console.error("BG: Error in checkPageStatus/isChannelWhitelisted:", error);
-						sendResponse({ shouldOverlay: false }); 
+						sendResponse({ shouldOverlay: false });
 					});
-					return true; 
+					return true;
 			} else { sendResponse({ shouldOverlay: false }); }
 			break;
         case "pauseOutOfFocus":
-             pauseOutOfFocus = request.val;
-             if (pauseOutOfFocus && checkBrowserFocusTimer == null) checkBrowserFocusTimer = setInterval(checkBrowserFocus, 1000);
-             else if (!pauseOutOfFocus && checkBrowserFocusTimer != null) { clearInterval(checkBrowserFocusTimer); checkBrowserFocusTimer = null; checkWindowsForTimerStart(); }
-             sendResponse({status: "Pause setting updated"}); break;
+            pauseOutOfFocus = request.val;
+            chrome.storage.local.set({"pauseOutOfFocus": pauseOutOfFocus}); // Persist this change
+            if (pauseOutOfFocus && checkBrowserFocusTimer == null) checkBrowserFocusTimer = setInterval(checkBrowserFocus, 1000);
+            else if (!pauseOutOfFocus && checkBrowserFocusTimer != null) { clearInterval(checkBrowserFocusTimer); checkBrowserFocusTimer = null; checkWindowsForTimerStart(); }
+            sendResponse({status: "Pause setting updated"}); break;
         case "youtubekidsEnabled":
             youtubekidsEnabled = request.val;
+            chrome.storage.local.set({"youtubekidsEnabled": youtubekidsEnabled}); // Persist
             if (currentTab && currentTab.url) checkTabStatus(currentTab.url); else checkWindowsForTimerStart();
             sendResponse({status: "YouTube Kids setting updated"}); break;
-        case "resetTimeUpdated": sendResponse({status: "Reset time change noted"}); break; 
-        case "noLimitInputChange": 
-            var todayDate = new Date(); var dayName = days[todayDate.getDay()];
-            if (request.day == dayName) { 
-                 noLimit = true; 
-                 if (timer != null) stopTime(); 
-                 updateBadge(); 
-                 hideOverlayOnAllWindows(); 
-                 if (currentTab && currentTab.url) checkTabStatus(currentTab.url); 
-            } sendResponse({status: "No limit change processed"}); break;
-        case "dayTimeLimitUpdated": 
-            var todayDateLimit = new Date(); var dayNameLimit = days[todayDateLimit.getDay()];
-            if (request.day == dayNameLimit) { 
-                noLimit = false; 
-                checkWindowsForTimerStart(); 
-                updateBadge(); 
-                if (currentTab && currentTab.url) checkTabStatus(currentTab.url); 
-            } sendResponse({status: "Day time limit change noted"}); break;
-        case "customizeLimitsFalse": 
-            noLimit = false; 
-            checkWindowsForTimerStart(); 
-            updateBadge(); 
-            if (currentTab && currentTab.url) checkTabStatus(currentTab.url);
-            sendResponse({status: "Customize limits disabled processed"}); break;
+        case "resetTimeUpdated": // This message comes from options when reset time input changes
+            // checkReset() will be called by the alarm, but we can also trigger it
+            // to ensure any immediate implications (though unlikely for just time change) are handled.
+            // The primary effect of changing resetTime is for the *next* reset.
+            // No direct action on timeLeft needed here beyond what checkReset will do.
+            setupResetCheckAlarm(); // Ensure alarm is (re)configured if it somehow got lost
+            sendResponse({status: "Reset time change noted, alarm re-checked."});
+            break;
         default: sendResponse({status: "Unknown message type"}); break;
 	}
     return false; 

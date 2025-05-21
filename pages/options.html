@@ -8,154 +8,175 @@
 	<link rel="stylesheet" type="text/css" href="../css/options.css">
 </head>
 <body>
-	<div id="container">
-		<h1 id="title">YouTube Time Options</h1>
+    <div id="passwordSection" class="container mt-5 text-center" style="max-width: 500px;">
+        <h2 id="passwordTitle">Enter Password</h2>
+        <div class="form-group">
+            <label for="passwordInput" class="sr-only">Password:</label>
+            <input type="password" id="passwordInput" class="form-control mb-2" placeholder="Password">
+        </div>
+        <button id="submitPasswordBtn" class="btn btn-primary mr-2">Unlock Options</button>
+        <button id="generatePasswordSuggestionBtn" class="btn btn-info">Suggest Password</button>
+        <p id="passwordSuggestion" class="mt-2 text-muted small"></p>
+        <p id="passwordError" class="text-danger mt-2"></p>
+        <p id="passwordInstructions" class="mt-3 small text-muted">If no password is set, leave blank and click "Unlock Options" to access and set one.</p>
+    </div>
 
-		<div id="settingsForm">
-			<label for="minutes"><h4>Minutes allowed per day: </h4></label>
-			<div id="minuterow" class="row mb-3 justify-content-center">
-				<input id="minutes" class="form-control setting-input" type="number" min="0" max="1439">
-			</div>
+	<div id="optionsContent" style="display: none;">
+		<div id="container">
+			<h1 id="title">YouTube Time Options</h1>
 
-			<div class="row justify-content-center mb-3">
-				<label for="customizeLimits" class="mr-2"><h4>Customize limit for each day of the week: </h4></label>
-				<input id="customizeLimits" class="big-checkbox setting-input" type="checkbox">
-			</div>
+			<div id="settingsForm">
+				<label for="minutes"><h4>Minutes allowed per day: </h4></label>
+				<div id="minuterow" class="row mb-3 justify-content-center">
+					<input id="minutes" class="form-control setting-input" type="number" min="0" max="1439">
+				</div>
 
-			<div id="customLimitsDiv" style="display: none;">
-				<div data-day="sunday" class="day-row form-row align-items-center justify-content-center">
+				<div class="row justify-content-center mb-3">
+					<label for="customizeLimits" class="mr-2"><h4>Customize limit for each day of the week: </h4></label>
+					<input id="customizeLimits" class="big-checkbox setting-input" type="checkbox">
+				</div>
+
+				<div id="customLimitsDiv" style="display: none;">
+					<div data-day="sunday" class="day-row form-row align-items-center justify-content-center">
+						<div class="col-auto">
+							<label for="sundayMinutes" class="day-label">Sunday</label>
+						</div>
+						<div class="col-auto mb-2">
+							<input id="sundayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
+						</div>
+						<div class="form-check mb-2 ml-4">
+							<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="sundayNoLimit">
+							<label class="form-check-label" for="sundayNoLimit">No limit</label>
+						</div>
+					</div>
+					<div data-day="monday" class="day-row form-row align-items-center justify-content-center">
+						<div class="col-auto">
+							<label for="mondayMinutes" class="day-label">Monday</label>
+						</div>
+						<div class="col-auto mb-2">
+							<input id="mondayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
+						</div>
+						<div class="form-check mb-2 ml-4">
+							<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="mondayNoLimit">
+							<label class="form-check-label" for="mondayNoLimit">No limit</label>
+						</div>
+					</div>
+					 <div data-day="tuesday" class="day-row form-row align-items-center justify-content-center">
+						<div class="col-auto">
+							<label for="tuesdayMinutes" class="day-label">Tuesday</label>
+						</div>
+						<div class="col-auto mb-2">
+							<input id="tuesdayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
+						</div>
+						<div class="form-check mb-2 ml-4">
+							<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="tuesdayNoLimit">
+							<label class="form-check-label" for="tuesdayNoLimit">No limit</label>
+						</div>
+					</div>
+					 <div data-day="wednesday" class="day-row form-row align-items-center justify-content-center">
+						<div class="col-auto">
+							<label for="wednesdayMinutes" class="day-label">Wednesday</label>
+						</div>
+						<div class="col-auto mb-2">
+							<input id="wednesdayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
+						</div>
+						<div class="form-check mb-2 ml-4">
+							<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="wednesdayNoLimit">
+							<label class="form-check-label" for="wednesdayNoLimit">No limit</label>
+						</div>
+					</div>
+					 <div data-day="thursday" class="day-row form-row align-items-center justify-content-center">
+						<div class="col-auto">
+							<label for="thursdayMinutes" class="day-label">Thursday</label>
+						</div>
+						<div class="col-auto mb-2">
+							<input id="thursdayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
+						</div>
+						<div class="form-check mb-2 ml-4">
+							<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="thursdayNoLimit">
+							<label class="form-check-label" for="thursdayNoLimit">No limit</label>
+						</div>
+					</div>
+					 <div data-day="friday" class="day-row form-row align-items-center justify-content-center">
+						<div class="col-auto">
+							<label for="fridayMinutes" class="day-label">Friday</label>
+						</div>
+						<div class="col-auto mb-2">
+							<input id="fridayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
+						</div>
+						<div class="form-check mb-2 ml-4">
+							<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="fridayNoLimit">
+							<label class="form-check-label" for="fridayNoLimit">No limit</label>
+						</div>
+					</div>
+					 <div data-day="saturday" class="day-row form-row align-items-center justify-content-center">
+						<div class="col-auto">
+							<label for="saturdayMinutes" class="day-label">Saturday</label>
+						</div>
+						<div class="col-auto mb-2">
+							<input id="saturdayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
+						</div>
+						<div class="form-check mb-2 ml-4">
+							<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="saturdayNoLimit">
+							<label class="form-check-label" for="saturdayNoLimit">No limit</label>
+						</div>
+					</div>
+				</div>
+
+				<label for="time" class="mt-3"><h4>When to reset the timer each day:</h4></label>
+				<div class="row justify-content-center mb-3">
+					<input id="time" class="form-control setting-input" type="time">
+				</div>
+
+				<div class="row justify-content-center mb-2">
+					<label for="limitOverrides" class="mr-2"><h4>Limit the number of overrides allowed per day:</h4></label>
+					<input id="limitOverrides" class="big-checkbox setting-input" type="checkbox">
+				</div>
+				<div id="overrideLimitRow" class="row mb-3 justify-content-center" style="visibility: hidden;">
+					<input id="overrideLimit" class="form-control setting-input" type="number" min="0" max="1000">
+				</div>
+
+				<div class="row justify-content-center mb-3">
+					<label for="pauseOutOfFocus" class="mr-2"><h4>Pause timer when YouTube is minimized/out of focus: </h4></label>
+					<input id="pauseOutOfFocus" class="big-checkbox setting-input" type="checkbox">
+				</div>
+
+				<div class="row justify-content-center mb-4">
+					<label for="youtubekidsEnabled" class="mr-2"><h4>Enable timer on youtubekids.com: </h4></label>
+					<input id="youtubekidsEnabled" class="big-checkbox setting-input" type="checkbox">
+				</div>
+
+				<hr>
+				<h4>Whitelisted Channels (by Handle or UC ID)</h4>
+				<p style="max-width: 600px; margin: auto; margin-bottom: 1rem;">
+					Add YouTube Channel Handles (e.g., @google, UCDhM2k2Cua-JdobAh5moMFg) below to exclude their videos and channel pages from the timer.
+					The handle is usually visible in the channel's URL or on their page.
+				</p>
+				<div class="form-row align-items-center justify-content-center mb-3">
 					<div class="col-auto">
-						<label for="sundayMinutes" class="day-label">Sunday</label>
+						<label for="whitelistChannelHandle" class="sr-only">Channel Handle</label>
+						<input type="text" class="form-control mb-2" id="whitelistChannelHandle" placeholder="Enter Channel Handle (e.g., @google)">
 					</div>
-					<div class="col-auto mb-2">
-						<input id="sundayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
-					</div>
-					<div class="form-check mb-2 ml-4">
-						<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="sundayNoLimit">
-						<label class="form-check-label" for="sundayNoLimit">No limit</label>
-					</div>
-				</div>
-				<div data-day="monday" class="day-row form-row align-items-center justify-content-center">
 					<div class="col-auto">
-						<label for="mondayMinutes" class="day-label">Monday</label>
-					</div>
-					<div class="col-auto mb-2">
-						<input id="mondayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
-					</div>
-					<div class="form-check mb-2 ml-4">
-						<input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="mondayNoLimit">
-						<label class="form-check-label" for="mondayNoLimit">No limit</label>
+						<button type="button" id="addWhitelistBtn" class="btn btn-primary mb-2">Add Handle</button>
 					</div>
 				</div>
-                 <div data-day="tuesday" class="day-row form-row align-items-center justify-content-center">
-                    <div class="col-auto">
-                        <label for="tuesdayMinutes" class="day-label">Tuesday</label>
-                    </div>
-                    <div class="col-auto mb-2">
-                        <input id="tuesdayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
-                    </div>
-                    <div class="form-check mb-2 ml-4">
-                        <input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="tuesdayNoLimit">
-                        <label class="form-check-label" for="tuesdayNoLimit">No limit</label>
-                    </div>
+				<ul id="whitelistHandles" class="list-group mb-3" style="max-width: 400px; margin: auto;">
+					</ul>
+                <hr>
+                <h4>Password Management</h4>
+                <div class="row justify-content-center mb-3">
+                    <button id="setChangePasswordBtn" class="btn btn-warning mr-2">Set/Change Password</button>
+                    <button id="removePasswordBtn" class="btn btn-danger">Remove Password</button>
                 </div>
-                 <div data-day="wednesday" class="day-row form-row align-items-center justify-content-center">
-                    <div class="col-auto">
-                        <label for="wednesdayMinutes" class="day-label">Wednesday</label>
-                    </div>
-                    <div class="col-auto mb-2">
-                        <input id="wednesdayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
-                    </div>
-                    <div class="form-check mb-2 ml-4">
-                        <input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="wednesdayNoLimit">
-                        <label class="form-check-label" for="wednesdayNoLimit">No limit</label>
-                    </div>
-                </div>
-                 <div data-day="thursday" class="day-row form-row align-items-center justify-content-center">
-                    <div class="col-auto">
-                        <label for="thursdayMinutes" class="day-label">Thursday</label>
-                    </div>
-                    <div class="col-auto mb-2">
-                        <input id="thursdayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
-                    </div>
-                    <div class="form-check mb-2 ml-4">
-                        <input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="thursdayNoLimit">
-                        <label class="form-check-label" for="thursdayNoLimit">No limit</label>
-                    </div>
-                </div>
-                 <div data-day="friday" class="day-row form-row align-items-center justify-content-center">
-                    <div class="col-auto">
-                        <label for="fridayMinutes" class="day-label">Friday</label>
-                    </div>
-                    <div class="col-auto mb-2">
-                        <input id="fridayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
-                    </div>
-                    <div class="form-check mb-2 ml-4">
-                        <input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="fridayNoLimit">
-                        <label class="form-check-label" for="fridayNoLimit">No limit</label>
-                    </div>
-                </div>
-                 <div data-day="saturday" class="day-row form-row align-items-center justify-content-center">
-                    <div class="col-auto">
-                        <label for="saturdayMinutes" class="day-label">Saturday</label>
-                    </div>
-                    <div class="col-auto mb-2">
-                        <input id="saturdayMinutes" class="form-control day-minute-input setting-input" type="number" min="0" max="1439">
-                    </div>
-                    <div class="form-check mb-2 ml-4">
-                        <input class="medium-checkbox form-check-input no-limit-input setting-input" type="checkbox" id="saturdayNoLimit">
-                        <label class="form-check-label" for="saturdayNoLimit">No limit</label>
-                    </div>
-                </div>
-			</div>
 
-			<label for="time" class="mt-3"><h4>When to reset the timer each day:</h4></label>
-			<div class="row justify-content-center mb-3">
-				<input id="time" class="form-control setting-input" type="time">
-			</div>
-
-			<div class="row justify-content-center mb-2">
-				<label for="limitOverrides" class="mr-2"><h4>Limit the number of overrides allowed per day:</h4></label>
-				<input id="limitOverrides" class="big-checkbox setting-input" type="checkbox">
-			</div>
-			<div id="overrideLimitRow" class="row mb-3 justify-content-center" style="visibility: hidden;">
-				<input id="overrideLimit" class="form-control setting-input" type="number" min="0" max="1000">
-			</div>
-
-			<div class="row justify-content-center mb-3">
-				<label for="pauseOutOfFocus" class="mr-2"><h4>Pause timer when YouTube is minimized/out of focus: </h4></label>
-				<input id="pauseOutOfFocus" class="big-checkbox setting-input" type="checkbox">
-			</div>
-
-			<div class="row justify-content-center mb-4">
-				<label for="youtubekidsEnabled" class="mr-2"><h4>Enable timer on youtubekids.com: </h4></label>
-				<input id="youtubekidsEnabled" class="big-checkbox setting-input" type="checkbox">
-			</div>
-
-			<hr>
-			<h4>Whitelisted Channels (by Handle or UC ID)</h4>
-			<p style="max-width: 600px; margin: auto; margin-bottom: 1rem;">
-				Add YouTube Channel Handles (e.g., @google, UCDhM2k2Cua-JdobAh5moMFg) below to exclude their videos and channel pages from the timer.
-				The handle is usually visible in the channel's URL or on their page.
-			</p>
-			<div class="form-row align-items-center justify-content-center mb-3">
-				<div class="col-auto">
-					<label for="whitelistChannelHandle" class="sr-only">Channel Handle</label>
-					<input type="text" class="form-control mb-2" id="whitelistChannelHandle" placeholder="Enter Channel Handle (e.g., @google)">
+				<div class="row justify-content-center mt-4 mb-3">
+					<button id="saveAllSettingsBtn" class="btn btn-success btn-lg">Save All Settings</button>
 				</div>
-				<div class="col-auto">
-					<button type="button" id="addWhitelistBtn" class="btn btn-primary mb-2">Add Handle</button>
-				</div>
+
+				<div id="statusMessage" class="mt-3" style="min-height: 20px;"></div>
+
 			</div>
-			<ul id="whitelistHandles" class="list-group mb-3" style="max-width: 400px; margin: auto;">
-				</ul>
-
-			<div class="row justify-content-center mt-4 mb-3">
-				<button id="saveAllSettingsBtn" class="btn btn-success btn-lg">Save All Settings</button>
-			</div>
-
-			<div id="statusMessage" class="mt-3" style="min-height: 20px;"></div>
-
 		</div>
 	</div>
 	<script type="text/javascript" src="../js/options.js"></script>
